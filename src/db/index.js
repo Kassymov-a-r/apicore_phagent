@@ -1,6 +1,11 @@
 import Database from 'better-sqlite3';
+import fs from 'fs';
+import path from 'path';
 
-export const db = new Database('data.sqlite');
+const dbPath = process.env.SQLITE_PATH || 'storage/data.sqlite';
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+export const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
 export function initDb() {
@@ -45,6 +50,14 @@ export function initDb() {
       hour_key TEXT NOT NULL,
       count INTEGER NOT NULL DEFAULT 0,
       UNIQUE(account_id, hour_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS processed_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      message_key TEXT NOT NULL UNIQUE,
+      text TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
 }

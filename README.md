@@ -1,65 +1,79 @@
-# Instagram Playwright Agent MVP
+# IG Playwright Agent — Render Login Version
 
-Отдельный экспериментальный агент для личных Instagram-аккаунтов через Instagram Web + Playwright.
+Отдельный MVP без Meta API. Работает через Instagram Web + Playwright.
 
-Важно: это не официальный Instagram API. Используй только для своих аккаунтов, без массовых рассылок и спама. Instagram может ограничивать автоматизацию.
+## Что умеет
 
-## Возможности
+- Веб-панель на Render.
+- Добавление нескольких Instagram-аккаунтов.
+- Вход через форму логин/пароль прямо в панели.
+- Пароль не сохраняется в базе: используется только один раз для входа.
+- Сохраняются cookies/session в `/app/storage/sessions`.
+- Автоответы в Direct по ключевым словам.
+- AI-генерация вариантов ответов через `OPENAI_API_KEY`.
+- Логи, лимиты, screenshots ошибок.
 
-- Добавление нескольких аккаунтов.
-- Ручной вход через открывшееся окно браузера.
-- Сохранение сессии Playwright в `storage/sessions`.
-- Правила по ключевым словам для Direct.
-- Автоответы по шаблонам.
-- AI-помощник для генерации текстов.
-- Логи.
-- Лимит ответов в час.
+## Важно
 
-## Запуск локально
+Это неофициальный способ через Instagram Web. Используй только для своих аккаунтов и осторожно. Не запускай массовые действия, спам, агрессивные лимиты.
 
-```bash
-npm install
-npx playwright install chromium
-cp .env.example .env
-npm start
+## Деплой на Render
+
+Рекомендуемый способ: **New → Blueprint** или **Docker Web Service**.
+
+Render должен использовать Dockerfile из проекта.
+
+В `render.yaml` уже настроено:
+
+- Docker runtime
+- persistent disk `/app/storage`
+- `HEADLESS=true`
+- `SQLITE_PATH=/app/storage/data.sqlite`
+
+Если создаёшь вручную:
+
+- Environment: Docker
+- Dockerfile Path: `./Dockerfile`
+- Persistent Disk:
+  - Mount path: `/app/storage`
+  - Size: 1 GB+
+
+## После деплоя
+
+1. Открой домен Render.
+2. Перейди в `Аккаунты`.
+3. Добавь аккаунт без `@`.
+4. Раскрой карточку аккаунта.
+5. Введи Instagram username/password.
+6. Если есть 2FA — введи код в поле 2FA.
+7. Нажми `Войти и сохранить сессию`.
+8. Нажми `Проверить`.
+9. Создай правило в `Автоматизации`.
+10. Нажми `Старт` в карточке аккаунта.
+
+## Env
+
+```env
+PORT=3000
+HEADLESS=true
+SQLITE_PATH=/app/storage/data.sqlite
+OPENAI_API_KEY=
+POLL_INTERVAL_MS=35000
+MAX_REPLIES_PER_ACCOUNT_PER_HOUR=12
+DRY_RUN=false
 ```
 
-Открой:
+## Если Instagram просит checkpoint
+
+В логах появится `login_failed` и screenshot. Иногда нужно:
+
+- зайти в Instagram вручную с того же аккаунта;
+- подтвердить вход;
+- повторить вход в панели;
+- ввести 2FA/security code.
+
+## Healthcheck
 
 ```text
-http://localhost:3000
+/healthz
 ```
-
-## Как пользоваться
-
-1. Открой раздел **Аккаунты**.
-2. Добавь username Instagram.
-3. Нажми **Открыть логин**.
-4. В открывшемся браузере войди в Instagram вручную.
-5. Вернись в платформу и нажми **Проверить сессию**.
-6. Создай правило в **Автоматизации**.
-7. Запусти агент в разделе **Аккаунты**.
-
-## Деплой
-
-Для Render Free это неудобно, потому что нужен браузер Playwright и живая сессия. Лучше использовать VPS/локальный сервер. Если деплоить на Render, нужен Docker + Playwright dependencies.
-
-## Ограничения
-
-- Селекторы Instagram Web могут меняться.
-- Первый вход часто требует 2FA/checkpoint.
-- Не рекомендуется делать массовые действия.
-- Для SaaS на клиентах лучше официальный Meta API.
-
-
-## Render build fix
-
-Если Render пытается использовать Node.js 26 и падает на `better-sqlite3`, используй эту сборку. Здесь зафиксирован Node.js 20 LTS через:
-
-- `package.json` → `engines.node = 20.x`
-- `.node-version`
-- `.nvmrc`
-- `render.yaml`
-
-Рекомендуемый деплой на Render: **Docker Web Service**, потому что Playwright требует браузерные зависимости.
-

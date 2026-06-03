@@ -36,6 +36,7 @@
         <h3>Добавить аккаунт</h3>
         <input id="newUsername" placeholder="username без @" />
         <button class="btn" onclick="addAccount()">Добавить</button>
+        <div class="muted small">После добавления используй форму входа ниже. Пароль не сохраняется: он используется один раз для создания session/cookies.</div>
       </div>
       <div id="accountsList"></div>
     </section>
@@ -64,14 +65,17 @@
 
     <section id="settings" class="tab hidden">
       <h1>Инструкция</h1>
-      <div class="card mono">1. npm install
-2. npx playwright install chromium
-3. cp .env.example .env
-4. npm start
-5. Добавь аккаунт → Открыть логин → войди вручную
-6. Проверить сессию
-7. Создай правило
-8. Запусти агент</div>
+      <div class="card mono">Render:
+1. Deploy as Docker Web Service.
+2. Add persistent disk mounted to /app/storage.
+3. Open dashboard.
+4. Add account.
+5. In account card enter Instagram username/password and optional 2FA code.
+6. Click "Войти и сохранить сессию".
+7. Create automation rule.
+8. Start agent.
+
+Пароли не сохраняются. Сохраняются только cookies/session в /app/storage.</div>
       <div class="card"><b>OPENAI_API_KEY</b> добавляется в .env, если хочешь AI-генерацию текстов.</div>
     </section>
   </main>
@@ -92,7 +96,16 @@ function renderStats(){
   $('#stats').innerHTML = `<div class="card"><h2>${accounts.length}</h2><div class="muted">Аккаунтов</div></div><div class="card"><h2>${rules.length}</h2><div class="muted">Правил</div></div><div class="card"><h2>${logs.length}</h2><div class="muted">Логов</div></div>`;
 }
 function renderAccounts(){
-  $('#accountsList').innerHTML = accounts.map(a=>`<div class="card"><div class="row between"><div><h3>@${a.username}</h3><div class="muted">Статус: <span class="pill">${a.status}</span></div><div class="small muted">Session: ${a.session_path}</div></div><div class="row"><button class="btn secondary" onclick="openLogin(${a.id})">Открыть логин</button><button class="btn secondary" onclick="checkSession(${a.id})">Проверить</button><button class="btn" onclick="startAgent(${a.id})">Старт</button><button class="btn secondary" onclick="stopAgent(${a.id})">Стоп</button><button class="btn danger" onclick="deleteAccount(${a.id})">Удалить</button></div></div></div>`).join('') || '<div class="card muted">Аккаунтов пока нет</div>';
+  $('#accountsList').innerHTML = accounts.map(a=>`<div class="card">
+    <div class="row between"><div><h3>@${a.username}</h3><div class="muted">Статус: <span class="pill">${a.status}</span></div><div class="small muted">Session: ${a.session_path}</div></div><div class="row"><button class="btn secondary" onclick="checkSession(${a.id})">Проверить</button><button class="btn" onclick="startAgent(${a.id})">Старт</button><button class="btn secondary" onclick="stopAgent(${a.id})">Стоп</button><button class="btn danger" onclick="deleteAccount(${a.id})">Удалить</button></div></div>
+    <details style="margin-top:12px"><summary class="muted" style="cursor:pointer">Войти через Instagram Web на Render</summary>
+      <div class="notice" style="margin-top:12px">Пароль не сохраняется в базе. Он отправляется только в этот запрос, чтобы Playwright вошёл в Instagram и сохранил cookies/session. Если Instagram попросит код/челлендж — введи его и нажми ещё раз.</div>
+      <input id="login_user_${a.id}" placeholder="Instagram username" value="${a.username}" autocomplete="username" />
+      <input id="login_pass_${a.id}" placeholder="Instagram password" type="password" autocomplete="current-password" />
+      <input id="login_2fa_${a.id}" placeholder="2FA / security code, если Instagram попросил" />
+      <button class="btn" onclick="loginCredentials(${a.id})">Войти и сохранить сессию</button>
+    </details>
+  </div>`).join('') || '<div class="card muted">Аккаунтов пока нет</div>';
 }
 function renderRuleAccounts(){
   $('#ruleAccount').innerHTML = '<option value="">Все аккаунты</option>' + accounts.map(a=>`<option value="${a.id}">@${a.username}</option>`).join('');
@@ -105,7 +118,14 @@ function renderLogs(){
 }
 async function addAccount(){const username=$('#newUsername').value; await api('/api/accounts',{method:'POST',body:JSON.stringify({username})}); $('#newUsername').value=''; loadAll();}
 async function deleteAccount(id){if(confirm('Удалить аккаунт и связанные данные?')){await api('/api/accounts/'+id,{method:'DELETE'});loadAll();}}
-async function openLogin(id){alert('Откроется браузер Playwright на сервере/локальной машине. Войди вручную.'); await api(`/api/accounts/${id}/login`,{method:'POST'}); loadAll();}
+async function openLogin(id){alert('На Render видимое окно браузера недоступно. Используй форму логина/пароля в карточке аккаунта.');}
+async function loginCredentials(id){
+  const username=$(`#login_user_${id}`).value; const password=$(`#login_pass_${id}`).value; const twoFactorCode=$(`#login_2fa_${id}`).value;
+  if(!username||!password) return alert('Введите логин и пароль');
+  const out = await api(`/api/accounts/${id}/login-credentials`,{method:'POST',body:JSON.stringify({username,password,twoFactorCode})});
+  $(`#login_pass_${id}`).value='';
+  alert(JSON.stringify(out,null,2)); loadAll();
+}
 async function checkSession(id){alert(JSON.stringify(await api(`/api/accounts/${id}/check`,{method:'POST'}),null,2)); loadAll();}
 async function startAgent(id){alert(JSON.stringify(await api(`/api/accounts/${id}/start`,{method:'POST'}),null,2)); loadAll();}
 async function stopAgent(id){await api(`/api/accounts/${id}/stop`,{method:'POST'}); loadAll();}

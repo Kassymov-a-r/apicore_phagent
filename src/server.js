@@ -3,13 +3,14 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { db, initDb, logEvent, parseJson } from './db/index.js';
-import { openLogin, checkSession, startAgent, stopAgent } from './services/instagramAgent.js';
+import { openLogin, loginWithCredentials, checkSession, startAgent, stopAgent } from './services/instagramAgent.js';
 import { generateReplies } from './services/ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 initDb();
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+app.use('/screenshots', express.static(path.resolve('storage/screenshots')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function asyncRoute(fn) {
@@ -42,6 +43,7 @@ app.delete('/api/accounts/:id', asyncRoute(async (req, res) => {
 }));
 
 app.post('/api/accounts/:id/login', asyncRoute(async (req, res) => res.json(await openLogin(Number(req.params.id)))));
+app.post('/api/accounts/:id/login-credentials', asyncRoute(async (req, res) => res.json(await loginWithCredentials(Number(req.params.id), req.body))));
 app.post('/api/accounts/:id/check', asyncRoute(async (req, res) => res.json(await checkSession(Number(req.params.id)))));
 app.post('/api/accounts/:id/start', asyncRoute(async (req, res) => res.json(await startAgent(Number(req.params.id)))));
 app.post('/api/accounts/:id/stop', asyncRoute(async (req, res) => res.json(await stopAgent(Number(req.params.id)))));
