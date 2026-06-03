@@ -50,3 +50,16 @@ http://localhost:3000
 - Первый вход часто требует 2FA/checkpoint.
 - Не рекомендуется делать массовые действия.
 - Для SaaS на клиентах лучше официальный Meta API.
+
+
+## Render build fix
+
+Если Render пытается использовать Node.js 26 и падает на `better-sqlite3`, используй эту сборку. Здесь зафиксирован Node.js 20 LTS через:
+
+- `package.json` → `engines.node = 20.x`
+- `.node-version`
+- `.nvmrc`
+- `render.yaml`
+
+Рекомендуемый деплой на Render: **Docker Web Service**, потому что Playwright требует браузерные зависимости.
+

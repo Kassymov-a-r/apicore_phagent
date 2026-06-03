@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "NODE_ENV=development nodemon src/server.js",
-    "install:browsers": "npx playwright install chromium"
+    "install:browsers": "npx playwright install chromium",
+    "render-build": "npm install && npx playwright install chromium"
   },
   "dependencies": {
     "@playwright/test": "^1.52.0",
@@ -18,5 +19,8 @@
   "devDependencies": {
     "nodemon": "^3.1.9"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": "20.x",
+    "npm": ">=10"
+  }
 }
