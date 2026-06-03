@@ -1,6 +1,7 @@
 import express from 'express';
 import bodyParser from 'body-parser';
 import { chromium } from 'playwright';
+import { execFileSync } from 'node:child_process';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -90,7 +91,19 @@ app.post('/api/browser/:id/start', async (req, res) => {
   if (!account) return res.status(404).json({ ok:false, error:'account_not_found' });
   try {
     if (browsers.has(id)) return res.json({ ok:true, alreadyOpen:true });
-    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+    let browser;
+    try {
+      browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] });
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (msg.includes('Executable doesn') || msg.includes('Please run the following command')) {
+        console.warn('[playwright] browser executable missing, installing chromium at runtime...');
+        execFileSync('npx', ['playwright', 'install', 'chromium'], { stdio: 'inherit' });
+        browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] });
+      } else {
+        throw err;
+      }
+    }
     const storageState = await hasSession(id) ? sessionPath(id) : undefined;
     const context = await browser.newContext({
       storageState,

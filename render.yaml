@@ -2,6 +2,7 @@ services:
   - type: web
     name: ig-remote-browser-agent
     env: docker
+    dockerfilePath: ./Dockerfile
     plan: starter
     disk:
       name: ig-agent-storage
@@ -14,5 +15,7 @@ services:
         value: /app/storage
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /ms-playwright
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "0"
       - key: OPENAI_API_KEY
         sync: false

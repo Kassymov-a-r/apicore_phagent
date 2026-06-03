@@ -1,33 +1,21 @@
-# IG Remote Browser Agent — Render Browser Fixed
+# IG Remote Browser Agent — Render robust build
 
-Эта версия исправляет ошибку Render:
+Эта сборка исправляет ошибку Playwright `Executable doesn't exist`.
 
-`Executable doesn't exist ... chrome-headless-shell`
+## Важно
+Деплой нужно делать как **Docker Web Service** или через **Blueprint** из `render.yaml`.
+Если создать обычный Node Web Service, Render может снова искать браузер в `/opt/render/.cache/ms-playwright`.
 
-Причина была в том, что Playwright был установлен, но Chromium не был установлен или версия Chromium не совпадала с версией Playwright.
+## Render deploy
+1. Залей проект в GitHub.
+2. Render → New → Blueprint → выбери репозиторий.
+3. Или Render → New → Web Service → Environment: **Docker**.
+4. После деплоя: Manual Deploy → Clear build cache & deploy.
 
-## Деплой на Render
+## Что исправлено
+- используется официальный Docker image `mcr.microsoft.com/playwright:v1.56.1-jammy`;
+- `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`;
+- добавлен runtime fallback: если Chromium отсутствует, сервер выполнит `npx playwright install chromium` и повторит запуск браузера.
 
-Используй **Docker Web Service** или **Blueprint**.
-
-Важно: не деплой как обычный Node Web Service.
-
-После загрузки новой версии сделай:
-
-`Manual Deploy -> Clear build cache & deploy`
-
-## Что изменено
-
-- Docker image обновлён до `mcr.microsoft.com/playwright:v1.56.1-jammy`
-- `playwright` зафиксирован на версии `1.56.1`
-- добавлен `RUN npx playwright install chromium`
-- добавлен `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`
-- добавлен persistent disk `/app/storage`
-
-## Проверка
-
-Открой:
-
-`/healthz`
-
-Потом в панели создай аккаунт и нажми открыть Remote Browser.
+## Health
+Открой `/healthz` после деплоя.
