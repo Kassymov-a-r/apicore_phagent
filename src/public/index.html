@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IG Playwright Agent</title>
+  <style>
+    :root{--bg:#0f172a;--panel:#111827;--card:#1f2937;--muted:#94a3b8;--text:#e5e7eb;--accent:#38bdf8;--danger:#fb7185;--ok:#34d399}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Arial,sans-serif} a{color:inherit}
+    .layout{display:grid;grid-template-columns:260px 1fr;min-height:100vh}.sidebar{background:#020617;padding:22px;border-right:1px solid #1f2937;position:sticky;top:0;height:100vh}.brand{font-weight:800;font-size:22px;margin-bottom:22px}.nav button{width:100%;display:block;background:transparent;color:var(--text);border:0;text-align:left;padding:12px;border-radius:12px;margin:4px 0;cursor:pointer}.nav button.active,.nav button:hover{background:#1e293b}.main{padding:26px;max-width:1200px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}.card{background:var(--panel);border:1px solid #243244;border-radius:18px;padding:18px;margin-bottom:16px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.between{justify-content:space-between}.muted{color:var(--muted);font-size:14px}.pill{border:1px solid #334155;border-radius:999px;padding:4px 10px;font-size:12px}.ok{color:var(--ok)}.danger{color:var(--danger)} input,textarea,select{width:100%;background:#020617;color:var(--text);border:1px solid #334155;border-radius:12px;padding:11px;margin:6px 0 12px} textarea{min-height:90px}.btn{background:var(--accent);color:#001018;border:0;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}.btn.secondary{background:#334155;color:var(--text)}.btn.danger{background:var(--danger);color:#fff}.btn:disabled{opacity:.6;cursor:not-allowed}.hidden{display:none}.log{border-left:3px solid #334155;padding:10px 12px;margin:10px 0;background:#0b1220;border-radius:10px}.log.error{border-left-color:var(--danger)}.mono{font-family:ui-monospace,Menlo,monospace;font-size:13px;white-space:pre-wrap}.notice{background:#172554;border:1px solid #1d4ed8;padding:14px;border-radius:14px;margin-bottom:16px}.small{font-size:12px}
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">IG Agent</div>
+    <div class="muted" style="margin-bottom:18px">Playwright MVP для личных аккаунтов</div>
+    <div class="nav">
+      <button data-tab="dashboard" class="active">🏠 Dashboard</button>
+      <button data-tab="accounts">📱 Аккаунты</button>
+      <button data-tab="rules">⚡ Автоматизации</button>
+      <button data-tab="logs">📜 Логи</button>
+      <button data-tab="settings">⚙️ Инструкция</button>
+    </div>
+  </aside>
+  <main class="main">
+    <section id="dashboard" class="tab">
+      <h1>Dashboard</h1>
+      <div class="notice">Этот проект работает через Instagram Web + Playwright. Используй только для своих аккаунтов и без массовых действий.</div>
+      <div class="grid" id="stats"></div>
+    </section>
+
+    <section id="accounts" class="tab hidden">
+      <h1>Аккаунты</h1>
+      <div class="card">
+        <h3>Добавить аккаунт</h3>
+        <input id="newUsername" placeholder="username без @" />
+        <button class="btn" onclick="addAccount()">Добавить</button>
+      </div>
+      <div id="accountsList"></div>
+    </section>
+
+    <section id="rules" class="tab hidden">
+      <h1>Автоматизации</h1>
+      <div class="card">
+        <h3>Новое правило</h3>
+        <label>Аккаунт</label><select id="ruleAccount"></select>
+        <label>Название</label><input id="ruleName" placeholder="Например: Апикор" />
+        <label>Ключевые слова, каждое с новой строки</label><textarea id="ruleKeywords" placeholder="апикор\nремонт\nцена"></textarea>
+        <div class="row between"><label>Ответы в Direct</label><button class="btn secondary" onclick="aiGenerate('dm')">AI сгенерировать</button></div>
+        <textarea id="ruleDmReplies" placeholder="Каждый вариант с новой строки"></textarea>
+        <div class="row between"><label>Ответы на комментарии (резерв под будущий модуль)</label><button class="btn secondary" onclick="aiGenerate('comment')">AI сгенерировать</button></div>
+        <textarea id="ruleCommentReplies" placeholder="Каждый вариант с новой строки"></textarea>
+        <button class="btn" onclick="saveRule()">Сохранить правило</button>
+      </div>
+      <div id="rulesList"></div>
+    </section>
+
+    <section id="logs" class="tab hidden">
+      <h1>Логи</h1>
+      <button class="btn secondary" onclick="loadAll()">Обновить</button>
+      <div id="logsList"></div>
+    </section>
+
+    <section id="settings" class="tab hidden">
+      <h1>Инструкция</h1>
+      <div class="card mono">1. npm install
+2. npx playwright install chromium
+3. cp .env.example .env
+4. npm start
+5. Добавь аккаунт → Открыть логин → войди вручную
+6. Проверить сессию
+7. Создай правило
+8. Запусти агент</div>
+      <div class="card"><b>OPENAI_API_KEY</b> добавляется в .env, если хочешь AI-генерацию текстов.</div>
+    </section>
+  </main>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let accounts = [], rules = [], logs = [];
+
+document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+function showTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));document.querySelector('#'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.tab===id));loadAll();}
+async function api(url, opts){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});return r.json();}
+function lines(v){return String(v||'').split('\n').map(s=>s.trim()).filter(Boolean)}
+async function loadAll(){
+  accounts=(await api('/api/accounts')).accounts||[]; rules=(await api('/api/rules')).rules||[]; logs=(await api('/api/logs')).logs||[];
+  renderStats(); renderAccounts(); renderRuleAccounts(); renderRules(); renderLogs();
+}
+function renderStats(){
+  $('#stats').innerHTML = `<div class="card"><h2>${accounts.length}</h2><div class="muted">Аккаунтов</div></div><div class="card"><h2>${rules.length}</h2><div class="muted">Правил</div></div><div class="card"><h2>${logs.length}</h2><div class="muted">Логов</div></div>`;
+}
+function renderAccounts(){
+  $('#accountsList').innerHTML = accounts.map(a=>`<div class="card"><div class="row between"><div><h3>@${a.username}</h3><div class="muted">Статус: <span class="pill">${a.status}</span></div><div class="small muted">Session: ${a.session_path}</div></div><div class="row"><button class="btn secondary" onclick="openLogin(${a.id})">Открыть логин</button><button class="btn secondary" onclick="checkSession(${a.id})">Проверить</button><button class="btn" onclick="startAgent(${a.id})">Старт</button><button class="btn secondary" onclick="stopAgent(${a.id})">Стоп</button><button class="btn danger" onclick="deleteAccount(${a.id})">Удалить</button></div></div></div>`).join('') || '<div class="card muted">Аккаунтов пока нет</div>';
+}
+function renderRuleAccounts(){
+  $('#ruleAccount').innerHTML = '<option value="">Все аккаунты</option>' + accounts.map(a=>`<option value="${a.id}">@${a.username}</option>`).join('');
+}
+function renderRules(){
+  $('#rulesList').innerHTML = rules.map(r=>`<div class="card"><div class="row between"><div><h3>${r.name}</h3><div class="muted">Аккаунт: ${r.username?'@'+r.username:'Все'} · Ключи: ${(r.keywords||[]).join(', ')}</div><div class="muted">DM вариантов: ${(r.dmReplies||[]).length}</div></div><button class="btn danger" onclick="deleteRule(${r.id})">Удалить</button></div></div>`).join('') || '<div class="card muted">Правил пока нет</div>';
+}
+function renderLogs(){
+  $('#logsList').innerHTML = logs.map(l=>`<div class="log ${l.level==='error'?'error':''}"><div><b>${new Date(l.created_at).toLocaleString()}</b> <span class="pill">${l.status}</span> ${l.username?'@'+l.username:''}</div><div>${l.text||''}</div><div class="muted mono">${l.details||''}</div></div>`).join('') || '<div class="card muted">Логов пока нет</div>';
+}
+async function addAccount(){const username=$('#newUsername').value; await api('/api/accounts',{method:'POST',body:JSON.stringify({username})}); $('#newUsername').value=''; loadAll();}
+async function deleteAccount(id){if(confirm('Удалить аккаунт и связанные данные?')){await api('/api/accounts/'+id,{method:'DELETE'});loadAll();}}
+async function openLogin(id){alert('Откроется браузер Playwright на сервере/локальной машине. Войди вручную.'); await api(`/api/accounts/${id}/login`,{method:'POST'}); loadAll();}
+async function checkSession(id){alert(JSON.stringify(await api(`/api/accounts/${id}/check`,{method:'POST'}),null,2)); loadAll();}
+async function startAgent(id){alert(JSON.stringify(await api(`/api/accounts/${id}/start`,{method:'POST'}),null,2)); loadAll();}
+async function stopAgent(id){await api(`/api/accounts/${id}/stop`,{method:'POST'}); loadAll();}
+async function saveRule(){
+  await api('/api/rules',{method:'POST',body:JSON.stringify({accountId:$('#ruleAccount').value||null,name:$('#ruleName').value,keywords:lines($('#ruleKeywords').value),dmReplies:lines($('#ruleDmReplies').value),commentReplies:lines($('#ruleCommentReplies').value)})});
+  ['ruleName','ruleKeywords','ruleDmReplies','ruleCommentReplies'].forEach(id=>$('#'+id).value=''); loadAll();
+}
+async function deleteRule(id){await api('/api/rules/'+id,{method:'DELETE'}); loadAll();}
+async function aiGenerate(type){
+  const keyword = lines($('#ruleKeywords').value)[0] || 'апикор';
+  const out = await api('/api/ai/generate',{method:'POST',body:JSON.stringify({purpose:type==='dm'?'direct message':'comment',keyword,tone:'friendly',count:6})});
+  if(!out.ok && out.error) return alert(out.error);
+  const text = (out.suggestions||[]).join('\n');
+  if(type==='dm') $('#ruleDmReplies').value = text; else $('#ruleCommentReplies').value = text;
+}
+loadAll(); setInterval(()=>{ if(!$('#logs').classList.contains('hidden')) loadAll(); }, 10000);
+</script>
+</body>
+</html>

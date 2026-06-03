@@ -1,0 +1,22 @@
+{
+  "name": "ig-playwright-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "NODE_ENV=development nodemon src/server.js",
+    "install:browsers": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.52.0",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.98.0",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": { "node": ">=20" }
+}
