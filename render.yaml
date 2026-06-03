@@ -12,5 +12,7 @@ services:
         value: production
       - key: STORAGE_DIR
         value: /app/storage
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: /ms-playwright
       - key: OPENAI_API_KEY
         sync: false

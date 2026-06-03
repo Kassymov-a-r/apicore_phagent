@@ -1,23 +1,33 @@
-# IG Remote Browser Agent MVP
+# IG Remote Browser Agent — Render Browser Fixed
 
-Отдельный экспериментальный проект без Meta API. Работает через серверный Playwright Chromium и встроенное remote browser окно в панели.
+Эта версия исправляет ошибку Render:
 
-## Как работает вход
+`Executable doesn't exist ... chrome-headless-shell`
 
-1. Открой `/accounts`.
-2. Создай аккаунт.
-3. Нажми `Открыть Remote Browser`.
-4. Внутри страницы появится серверный Instagram Web.
-5. Войди вручную, включая 2FA/checkpoint.
-6. Нажми `Сохранить сессию`.
-7. Пароль не сохраняется. На диске хранится только Playwright storageState/cookies.
+Причина была в том, что Playwright был установлен, но Chromium не был установлен или версия Chromium не совпадала с версией Playwright.
 
-## Render
+## Деплой на Render
 
-Деплой как Docker Web Service или Blueprint через `render.yaml`.
+Используй **Docker Web Service** или **Blueprint**.
 
-Обязательно нужен persistent disk `/app/storage`, иначе сессии будут теряться после рестарта.
+Важно: не деплой как обычный Node Web Service.
 
-## Ограничения
+После загрузки новой версии сделай:
 
-Это неофициальная автоматизация Instagram Web. Используй только для собственных аккаунтов, с маленькими лимитами и без массового спама.
+`Manual Deploy -> Clear build cache & deploy`
+
+## Что изменено
+
+- Docker image обновлён до `mcr.microsoft.com/playwright:v1.56.1-jammy`
+- `playwright` зафиксирован на версии `1.56.1`
+- добавлен `RUN npx playwright install chromium`
+- добавлен `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`
+- добавлен persistent disk `/app/storage`
+
+## Проверка
+
+Открой:
+
+`/healthz`
+
+Потом в панели создай аккаунт и нажми открыть Remote Browser.
