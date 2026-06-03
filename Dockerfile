@@ -1,10 +1,10 @@
-FROM mcr.microsoft.com/playwright:v1.52.0-jammy
+FROM mcr.microsoft.com/playwright:v1.49.1-jammy
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY . .
-RUN mkdir -p /app/storage/sessions /app/storage/screenshots
-ENV HEADLESS=true
-ENV SQLITE_PATH=/app/storage/data.sqlite
-EXPOSE 3000
+ENV NODE_ENV=production
+ENV PORT=10000
+ENV STORAGE_DIR=/app/storage
+EXPOSE 10000
 CMD ["npm", "start"]

@@ -1,26 +1,15 @@
 {
-  "name": "ig-playwright-agent",
+  "name": "ig-remote-browser-agent",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "NODE_ENV=development nodemon src/server.js",
-    "install:browsers": "npx playwright install chromium",
-    "render-build": "npm install && npx playwright install chromium"
+    "start": "node src/server.js"
   },
   "dependencies": {
-    "@playwright/test": "^1.52.0",
-    "better-sqlite3": "^11.10.0",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "openai": "^4.98.0",
-    "pino": "^9.6.0"
+    "@playwright/test": "^1.49.1",
+    "express": "^4.19.2",
+    "body-parser": "^1.20.2",
+    "multer": "^1.4.5-lts.1"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.9"
-  },
-  "engines": {
-    "node": "20.x",
-    "npm": ">=10"
-  }
+  "engines": { "node": "20.x" }
 }

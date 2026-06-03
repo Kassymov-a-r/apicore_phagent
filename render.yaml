@@ -1,23 +1,16 @@
 services:
   - type: web
-    name: ig-playwright-agent
+    name: ig-remote-browser-agent
     env: docker
     plan: starter
-    dockerfilePath: ./Dockerfile
     disk:
-      name: ig-playwright-storage
+      name: ig-agent-storage
       mountPath: /app/storage
       sizeGB: 1
     envVars:
-      - key: NODE_VERSION
-        value: 20.20.2
-      - key: HEADLESS
-        value: "true"
-      - key: SQLITE_PATH
-        value: "/app/storage/data.sqlite"
-      - key: PORT
-        value: "3000"
-      - key: POLL_INTERVAL_MS
-        value: "35000"
-      - key: MAX_REPLIES_PER_ACCOUNT_PER_HOUR
-        value: "12"
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_DIR
+        value: /app/storage
+      - key: OPENAI_API_KEY
+        sync: false
