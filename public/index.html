@@ -20,6 +20,7 @@
       <button onclick="show('accounts',this)">👤 Аккаунты</button>
       <button onclick="show('rules',this)">⚡ Автоматизации</button>
       <button onclick="show('logs',this)">📜 Логи</button>
+      <button onclick="show('webhook',this)">🔔 Webhook</button>
       <button onclick="show('assistant',this)">🤖 AI Assistant</button>
       <button onclick="show('settings',this)">🔐 Секреты</button>
       <button onclick="show('debug',this)">🧪 Debug</button>
@@ -119,6 +120,42 @@ https://apicore.kz/ru</textarea>
       </div>
     </section>
 
+
+    <section id="webhook" class="hidden">
+      <h1>Webhook</h1>
+      <div class="card">
+        <h3>Webhook-first режим</h3>
+        <p class="muted">Для автоответов на реальные комментарии и Direct основной путь — Meta Webhooks. Polling оставлен только для диагностики.</p>
+        <div class="grid">
+          <div>
+            <b>Callback URL</b>
+            <code id="webhookCallback">Загружается...</code>
+          </div>
+          <div>
+            <b>Verify Token</b>
+            <code id="webhookVerify">Загружается...</code>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn secondary" onclick="webhookStatus('webhookOut')">Webhook Status</button>
+          <button class="btn secondary" onclick="events('webhookOut')">Webhook Events</button>
+          <button class="btn ok" onclick="webhookSubscribe('webhookOut')">Subscribe Webhooks</button>
+          <button class="btn secondary" onclick="sendTestWebhook('webhookOut')">Send Test Webhook</button>
+          <button class="btn secondary" onclick="debugMetaTo('webhookOut')">Auth Debug</button>
+        </div>
+        <p class="muted small">Если кнопка Subscribe вернёт ошибку Meta — раскрой JSON ниже и пришли мне его. Там будет точная причина.</p>
+        <pre id="webhookOut"></pre>
+      </div>
+      <div class="card">
+        <h3>Что указать в Meta</h3>
+        <div class="kv">
+          <b>Webhook URL</b><code id="metaWebhookUrl">/webhook/instagram</code>
+          <b>Verify Token</b><code id="metaVerifyToken">META_WEBHOOK_VERIFY_TOKEN</code>
+          <b>Fields</b><span>comments, live_comments, mentions, messages, message_edit, message_reactions, messaging_postbacks, messaging_seen</span>
+        </div>
+      </div>
+    </section>
+
     <section id="settings" class="hidden">
       <h1>Секреты / настройки</h1>
       <div class="card">
@@ -145,7 +182,7 @@ function escapeHtml(s){return String(s ?? '').replace(/[&<>"]/g,c=>({'&':'&amp;'
 function statusClass(s){ if(['error','poll_finished_with_errors'].includes(s)) return 'bad'; if(['ignored','received','duplicate'].includes(s)) return 'warn'; if(['debug_webhook_processing_started','debug_webhook_entry','debug_rules_loaded','debug_comment_received','debug_dm_received','debug_poll_media_request','debug_poll_media_response','debug_poll_conversations_request','debug_poll_conversations_response','debug_poll_started','debug_poll_accounts_loaded','debug_media_item','debug_poll_comment_found','debug_poll_message_found'].includes(s)) return 'debug'; return ''; }
 function pretty(obj){ try{return JSON.stringify(obj,null,2)}catch{return String(obj)} }
 async function api(url,opt){const r=await fetch(url,opt); const t=await r.text(); let data; try{data=JSON.parse(t)}catch{data={raw:t}}; if(!r.ok) throw new Error(data.error||t); return data}
-function show(id,b){document.querySelectorAll('main section').forEach(s=>s.classList.add('hidden'));$('#'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active'); if(id==='accounts')loadAccounts(); if(id==='rules')loadRules(); if(id==='logs')loadLogs(); if(id==='settings')settingsLoad(); if(id==='assistant')assistantFiles(); if(id==='setup')setup();}
+function show(id,b){document.querySelectorAll('main section').forEach(s=>s.classList.add('hidden'));$('#'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active'); if(id==='accounts')loadAccounts(); if(id==='rules')loadRules(); if(id==='logs')loadLogs(); if(id==='webhook')webhookInit(); if(id==='settings')settingsLoad(); if(id==='assistant')assistantFiles(); if(id==='setup')setup();}
 
 async function setup(){try{const d=await api('/api/auth/debug');const missing=[]; if(!d.hasAppId)missing.push('INSTAGRAM_CLIENT_ID / META_APP_ID'); if(!d.hasAppSecret)missing.push('META_APP_SECRET / INSTAGRAM_CLIENT_SECRET'); if(!d.requiredMetaSetup?.webhookVerifyTokenConfigured)missing.push('META_WEBHOOK_VERIFY_TOKEN'); $('#setupOut').innerHTML=`<div class=card><h3>Статус</h3>${missing.length?`<p><span class="pill bad">missing</span> ${missing.join(', ')}</p>`:'<p><span class="pill">OK</span> основные ключи настроены</p>'}<div class="kv"><b>Redirect URI</b><code>${escapeHtml(d.callbackUrl)}</code><b>Webhook URL</b><code>${escapeHtml(d.requiredMetaSetup?.webhookCallbackUrl||'')}</code><b>Scopes</b><span>${escapeHtml((d.scopes||[]).join(', '))}</span></div></div>`}catch(e){$('#setupOut').innerHTML=`<div class=card><span class="pill bad">error</span> ${escapeHtml(e.message)}</div>`}}
 async function loadAccounts(){try{const d=await api('/api/accounts');$('#accountsList').innerHTML=d.accounts.map(a=>`<div class=card><h2>@${escapeHtml(a.username||a.ig_user_id)}</h2><div class=muted>IG ID: ${escapeHtml(a.ig_user_id)}</div><div>Тип: ${escapeHtml(a.account_type||'—')} · Метод: ${escapeHtml(a.connection_method||'—')} · <span class=pill>${a.active?'active':'off'}</span></div><div class=small>Token expires: ${escapeHtml(a.token_expires_at||'unknown')}</div><div class=row><button class="btn secondary" onclick="refreshToken(${a.id})">Refresh token</button><button class="btn danger" onclick="delAccount(${a.id})">Удалить</button></div></div>`).join('')||'<div class=card>Пока нет аккаунтов</div>'; const sel=$('#ruleAccount'); if(sel){sel.innerHTML=d.accounts.map(a=>`<option value="${a.id}">@${escapeHtml(a.username)}</option>`).join('')}}catch(e){$('#accountsList').innerHTML=`<div class=card>${escapeHtml(e.message)}</div>`}}
@@ -163,13 +200,14 @@ async function copyLog(id){const d=await api('/api/logs/'+id); await navigator.c
 async function runPoll(){try{const d=await api('/api/poll/run',{method:'POST'}); $('#pollDebugOut').textContent=pretty(d); alert('Проверка завершена. Открой раскрытые логи.'); loadLogs()}catch(e){alert(e.message)}}
 async function mediaDebug(){try{const d=await api('/api/poll/media-debug?limit=50'); $('#pollDebugOut').textContent=pretty(d); loadLogs()}catch(e){alert(e.message)}}
 async function convDebug(){try{const d=await api('/api/poll/conversations-debug?limit=10'); $('#pollDebugOut').textContent=pretty(d); loadLogs()}catch(e){alert(e.message)}}
-async function debugMeta(){ const d=await api('/api/auth/debug'); const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); setup(); }
+async function debugMeta(){ return debugMetaTo('debugOut'); }
+async function debugMetaTo(target='debugOut'){ const d=await api('/api/auth/debug'); const out=$('#'+target)||$('#debugOut')||$('#pollDebugOut')||$('#webhookOut'); if(out) out.textContent=pretty(d); setup(); return d; }
 async function stateDebug(target='debugOut'){ const d=await api('/api/debug/state'); const out=$('#'+target)||$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); }
 
-async function webhookStatus(){ const d=await api('/api/webhook/status'); const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); }
-async function webhookSubscribe(){ if(!confirm('Попробовать подписать приложение на Instagram webhook fields через Graph API?')) return; try{ const d=await api('/api/webhook/subscribe',{method:'POST'}); const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); alert('Webhook subscribe выполнен. Проверь Meta и Webhook Events.'); loadLogs(); }catch(e){ const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=e.message; alert(e.message); }}
+async function webhookStatus(target='debugOut'){ const d=await api('/api/webhook/status'); const out=$('#'+target)||$('#debugOut')||$('#pollDebugOut')||$('#webhookOut'); if(out) out.textContent=pretty(d); return d; }
+async function webhookSubscribe(target='debugOut'){ if(!confirm('Попробовать подписать приложение на Instagram webhook fields через Graph API?')) return; try{ const d=await api('/api/webhook/subscribe',{method:'POST'}); const out=$('#'+target)||$('#debugOut')||$('#pollDebugOut')||$('#webhookOut'); if(out) out.textContent=pretty(d); alert('Webhook subscribe выполнен. Проверь Meta и Webhook Events.'); loadLogs(); }catch(e){ const out=$('#'+target)||$('#debugOut')||$('#pollDebugOut')||$('#webhookOut'); if(out) out.textContent=e.message; alert(e.message); }}
 
-async function events(){ $('#debugOut').textContent=pretty(await api('/api/webhook/events'))}
+async function events(target='debugOut'){ const out=$('#'+target)||$('#debugOut')||$('#webhookOut'); out.textContent=pretty(await api('/api/webhook/events')); }
 async function health(){ $('#debugOut').textContent=pretty(await api('/healthz'))}
 async function matchTest(){ $('#debugOut').textContent=pretty(await api('/api/debug/match?text='+encodeURIComponent($('#matchText').value)))}
 async function ai(type){const topic=prompt('О чём ответы?', 'апикор, консультация, ссылка'); if(!topic)return; try{const d=await api('/api/ai/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({topic,type,count:5,tone:'friendly'})}); if(!d.ok)return alert(d.error); const id=type==='comment'?'publicReplies':'dmReplies'; $('#'+id).value=d.items.join('\n')}catch(e){alert(e.message)}}
@@ -196,6 +234,29 @@ async function assistantFiles(){
 async function settingsLoad(){try{const d=await api('/api/settings'); $('#settingsForm').innerHTML=d.settings.map(s=>`<label>${escapeHtml(s.key)} <span class="pill ${s.configured?'':'bad'}">${escapeHtml(s.source)}</span></label><input class=input data-key="${escapeHtml(s.key)}" value="${escapeHtml(s.value||'')}" placeholder="${s.secret?'secret value':''}">`).join('')}catch(e){$('#settingsForm').innerHTML=`<div class=card>${escapeHtml(e.message)}</div>`}}
 async function settingsSave(){const body={}; document.querySelectorAll('#settingsForm input').forEach(i=>body[i.dataset.key]=i.value); try{await api('/api/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); alert('Сохранено'); settingsLoad(); setup()}catch(e){alert(e.message)}}
 async function settingsResetBuiltins(){try{await api('/api/settings/reset-builtins',{method:'POST'}); alert('Встроенные значения применены'); settingsLoad(); setup()}catch(e){alert(e.message)}}
+
+async function webhookInit(){
+  try{
+    const d=await api('/api/auth/debug');
+    const st=await api('/api/webhook/status').catch(e=>({error:e.message}));
+    const cb=d.requiredMetaSetup?.webhookCallbackUrl || d.webhookUrl || (location.origin + '/webhook/instagram');
+    const vt=d.requiredMetaSetup?.webhookVerifyToken || d.verifyToken || 'META_WEBHOOK_VERIFY_TOKEN';
+    const set=(id,val)=>{const el=$('#'+id); if(el) el.textContent=val};
+    set('webhookCallback', cb); set('metaWebhookUrl', cb); set('webhookVerify', vt); set('metaVerifyToken', vt);
+    $('#webhookOut').textContent=pretty({authDebug:d, webhookStatus:st});
+  }catch(e){ $('#webhookOut').textContent=e.message; }
+}
+async function sendTestWebhook(target='webhookOut'){
+  const out=$('#'+target)||$('#webhookOut')||$('#debugOut');
+  const payload={object:'instagram', entry:[{id:'test_ig_user', time:Date.now(), changes:[{field:'comments', value:{id:'test_comment_'+Date.now(), text:'апикор', from:{id:'test_user', username:'test_user'}, media:{id:'test_media', media_product_type:'FEED'}}}]}]};
+  try{
+    const r=await fetch('/webhook/instagram',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
+    const t=await r.text();
+    let data; try{data=JSON.parse(t)}catch{data={raw:t}}
+    out.textContent=pretty({sent:payload, response:data, httpStatus:r.status});
+    loadLogs();
+  }catch(e){ out.textContent=e.message; }
+}
 setup(); loadAccounts();
 </script>
 </body>
