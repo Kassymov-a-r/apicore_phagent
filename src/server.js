@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
 import OpenAI from 'openai';
-import { initDb, q } from './db.js';
+import { initDb, q, dbInfo } from './db.js';
 import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret, dryRun } from './config.js';
 import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken } from './instagram.js';
 import { processWebhook } from './processor.js';
@@ -23,7 +23,7 @@ function decodeState(s='') { try { return JSON.parse(Buffer.from(String(s), 'bas
 app.get('/healthz', asyncRoute(async (req,res)=>{
   let db='missing';
   try { await q('select 1'); db='connected'; } catch(e) { db=e.message; }
-  res.json({ ok:true, app:'ig-agent-best-practices', database:db, dryRun:dryRun() });
+  res.json({ ok:true, app:'ig-agent-best-practices', database:db, databaseInfo: dbInfo(), dryRun:dryRun() });
 }));
 app.get('/api/me', (req,res)=>res.json({ user: ownerMode() }));
 app.get('/api/meta/debug', (req,res)=>res.json(publicDebug(req)));

@@ -80,3 +80,20 @@ https://твой-домен.onrender.com/auth/instagram/callback
 ## Важно
 
 Instagram Login API остаётся официальным Meta/Instagram flow. Для стабильной работы на чужих аккаунтах всё равно может понадобиться Live Mode и одобрение permissions. Эта сборка убирает путаницу с env-файлами и позволяет вводить/менять ключи из интерфейса.
+
+## Database fallback
+
+If `DATABASE_URL` is not configured, the app now starts with a local JSON database fallback.
+This is useful for quick testing and single-user MVP mode.
+
+For production, use PostgreSQL and set `DATABASE_URL` in Render. Without PostgreSQL, data may be lost after redeploy unless you attach a Render disk and set:
+
+```env
+DATA_DIR=/data
+```
+
+Health check will show the current mode:
+
+```text
+/healthz
+```
