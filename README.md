@@ -103,3 +103,23 @@ Meta Webhooks are the primary path for real-time Instagram comments and messages
 ### Recommended operation
 
 Use webhooks for new comments and messages. Use polling only to prove token/media visibility and diagnose API restrictions.
+
+## UI update: Apicore portal style
+
+This build refreshes the dashboard to look like an Apicore.one subsystem: light B2B portal layout, navy sidebar, blue/cyan accents, rounded cards, clearer statuses, and improved automation setup.
+
+### Automation section changes
+
+- Split setup into internal tabs:
+  - Comments → Direct
+  - Incoming Direct
+  - Test and preview
+- Added hints for keyword setup, comment replies, direct-message replies, and safe testing.
+- Added a phone-style preview block.
+- Kept existing backend schema and actions compatible with previous builds.
+
+### Webhook section changes
+
+- The old Subscribe button is now labeled as a Graph API subscribe test. Real Instagram webhook setup still must be checked in Meta App Dashboard.
+
+See `TEST_REPORT.md` for local verification results.
