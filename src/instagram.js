@@ -26,7 +26,7 @@ export async function graphPost(path, token, body = {}) {
 export async function exchangeCodeForToken({ code, redirectUri }) {
   const url = new URL('https://api.instagram.com/oauth/access_token');
   const body = new URLSearchParams({
-    client_id: process.env.META_APP_ID,
+    client_id: process.env.INSTAGRAM_CLIENT_ID || process.env.INSTAGRAM_APP_ID || process.env.META_APP_ID || process.env.APP_ID,
     client_secret: process.env.META_APP_SECRET,
     grant_type: 'authorization_code',
     redirect_uri: redirectUri,
@@ -75,7 +75,7 @@ export function publicDebug(req) {
     baseUrl: base,
     callbackUrl: `${base}/auth/instagram/callback`,
     webhookUrl: `${base}/webhook/instagram`,
-    hasAppId: !!process.env.META_APP_ID,
+    hasAppId: !!(process.env.INSTAGRAM_CLIENT_ID || process.env.INSTAGRAM_APP_ID || process.env.META_APP_ID || process.env.APP_ID),
     hasAppSecret: !!process.env.META_APP_SECRET,
     graphVersion: graphVersion(),
     loginMode: 'instagram_third_party',

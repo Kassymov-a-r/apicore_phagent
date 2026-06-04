@@ -16,6 +16,10 @@ app.use(express.static('public'));
 
 function asyncRoute(fn){ return (req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next); }
 
+function getInstagramClientId() {
+  return process.env.INSTAGRAM_CLIENT_ID || process.env.INSTAGRAM_APP_ID || process.env.META_APP_ID || process.env.APP_ID || '';
+}
+
 app.get('/healthz', asyncRoute(async (req,res)=>{
   let db='missing';
   try { await q('select 1'); db='connected'; } catch(e) { db=e.message; }
@@ -24,7 +28,7 @@ app.get('/healthz', asyncRoute(async (req,res)=>{
 
 app.get('/api/meta/debug', (req,res)=>res.json(publicDebug(req)));
 function buildInstagramLoginUrl(req, debug = false) {
-  const clientId = process.env.META_APP_ID || (debug ? 'MISSING_META_APP_ID' : '');
+  const clientId = getInstagramClientId() || (debug ? 'MISSING_INSTAGRAM_CLIENT_ID' : '');
   const statePayload = {
     type: 'instagram',
     flow: 'third_party',
@@ -45,6 +49,7 @@ function buildInstagramLoginUrl(req, debug = false) {
   const loginUrl = new URL('https://www.instagram.com/accounts/login/');
   loginUrl.searchParams.set('force_authentication', '1');
   loginUrl.searchParams.set('platform_app_id', clientId);
+  loginUrl.searchParams.set('client_id', clientId);
   loginUrl.searchParams.set('next', thirdParty.pathname + thirdParty.search);
   loginUrl.searchParams.set('enable_fb_login', '1');
   loginUrl.searchParams.set('flo', 'true');
@@ -59,12 +64,16 @@ app.get('/api/auth/debug', (req,res)=>{
     thirdPartyUrl: built.thirdPartyUrl.toString(),
     callbackUrl: built.callbackUrl,
     scopes: instagramScopes,
-    hasAppId: !!process.env.META_APP_ID,
+    hasAppId: !!getInstagramClientId(),
+    clientIdSource: process.env.INSTAGRAM_CLIENT_ID ? 'INSTAGRAM_CLIENT_ID' : process.env.INSTAGRAM_APP_ID ? 'INSTAGRAM_APP_ID' : process.env.META_APP_ID ? 'META_APP_ID' : process.env.APP_ID ? 'APP_ID' : 'missing',
+    clientIdPreview: getInstagramClientId() ? `${getInstagramClientId().slice(0,4)}...${getInstagramClientId().slice(-4)}` : null,
     flow: 'instagram_accounts_login_third_party'
   });
 });
 
 app.get('/auth/instagram', (req,res)=>{
+  const clientId = getInstagramClientId();
+  if (!clientId) return res.status(400).send('Missing Instagram Client ID. Set INSTAGRAM_CLIENT_ID or META_APP_ID in Render Environment.');
   const built = buildInstagramLoginUrl(req);
   res.redirect(built.loginUrl.toString());
 });
