@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ig-instagram-login-agent
+    name: ig-agent-instagram-login-best-practices
     env: node
     plan: starter
     buildCommand: npm install
@@ -10,9 +10,13 @@ services:
         value: 20.20.2
       - key: DATABASE_URL
         fromDatabase:
-          name: ig-instagram-login-agent-db
+          name: ig-agent-instagram-login-db
           property: connectionString
       - key: APP_BASE_URL
+        sync: false
+      - key: INSTAGRAM_CLIENT_ID
+        sync: false
+      - key: INSTAGRAM_CLIENT_SECRET
         sync: false
       - key: META_APP_ID
         sync: false
@@ -28,5 +32,5 @@ services:
         sync: false
 
 databases:
-  - name: ig-instagram-login-agent-db
+  - name: ig-agent-instagram-login-db
     plan: basic-256mb

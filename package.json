@@ -1,6 +1,6 @@
 {
-  "name": "ig-instagram-login-agent",
-  "version": "1.0.0",
+  "name": "ig-agent-instagram-login-best-practices",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",

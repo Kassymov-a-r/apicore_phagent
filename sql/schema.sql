@@ -3,16 +3,20 @@ create table if not exists settings (
   value text,
   updated_at timestamptz default now()
 );
+
 create table if not exists instagram_accounts (
   id bigserial primary key,
   ig_user_id text unique not null,
   username text,
+  account_type text,
   access_token text not null,
   token_expires_at timestamptz,
   active boolean default true,
+  connection_method text default 'instagram_login',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
 create table if not exists automation_rules (
   id bigserial primary key,
   account_id bigint references instagram_accounts(id) on delete cascade,
@@ -26,6 +30,7 @@ create table if not exists automation_rules (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
 create table if not exists webhook_events (
   id bigserial primary key,
   object_type text,
@@ -38,6 +43,16 @@ create table if not exists webhook_events (
   error text,
   created_at timestamptz default now()
 );
+
+create table if not exists processed_items (
+  id bigserial primary key,
+  account_id bigint references instagram_accounts(id) on delete cascade,
+  external_id text not null,
+  source text not null,
+  created_at timestamptz default now(),
+  unique(account_id, external_id, source)
+);
+
 create table if not exists activity_logs (
   id bigserial primary key,
   account_id bigint references instagram_accounts(id) on delete set null,
@@ -55,5 +70,10 @@ create table if not exists activity_logs (
   raw jsonb,
   created_at timestamptz default now()
 );
+
+alter table instagram_accounts add column if not exists account_type text;
+alter table instagram_accounts add column if not exists connection_method text default 'instagram_login';
+
 create index if not exists idx_logs_created_at on activity_logs(created_at desc);
 create index if not exists idx_events_created_at on webhook_events(created_at desc);
+create index if not exists idx_processed_items_account on processed_items(account_id, source);

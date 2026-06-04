@@ -1,64 +1,58 @@
-# IG Agent — Instagram Login third-party OAuth version
+# IG Agent — Official Instagram Login API
 
-Чистый проект под **Instagram Login API** без Facebook Page flow и без Playwright.
+Отдельная Render-ready версия под официальный Instagram API with Instagram Login.
 
 ## Что внутри
 
-- OAuth через Instagram web login flow, похожий на ChatPlace:
-  - `https://www.instagram.com/accounts/login/`
-  - `next=/oauth/authorize/third_party/`
-- Scopes:
-  - `instagram_business_basic`
-  - `instagram_business_manage_comments`
-  - `instagram_business_manage_messages`
-- Без `pages_manage_metadata`
-- Без `pages_messaging`
-- Без `pages_*` зависимостей в OAuth
-- Webhook endpoint: `/webhook/instagram`
-- Accounts, Automations, Logs, Debug
-- AI генератор ответов через OpenAI
+- Авторизация через Instagram Login flow, похожий на ChatPlace: `instagram.com/accounts/login` → `/oauth/authorize/third_party`.
+- Альтернативный direct authorize URL: `/auth/instagram/direct`.
+- Facebook fallback URL: `/auth/facebook-fallback` для старого Page-flow.
+- Manual Token Connect — можно вставить официальный Instagram User Access Token из Meta, если OAuth ещё настраивается.
+- Webhooks: comments, live_comments, mentions, messages.
+- Правила: ключевые слова, варианты публичных ответов, варианты ответов в Direct.
+- AI-помощник для генерации текстов ответов.
+- Логи, raw webhook events, keyword test, ручной Poll fallback.
+
+## Важная правда про Meta
+
+1. Для своих тестовых аккаунтов приложение может работать в Development, если аккаунты добавлены в роли/testers и permissions доступны.
+2. Для подключения чужих клиентов и стабильной работы на публичных аккаунтах нужен Live Mode + App Review / Advanced Access.
+3. Неофициальные варианты через логин/пароль, private API или браузерную автоматизацию не подходят для масштабируемого SaaS: они нестабильны и могут привести к блокировкам.
+4. Лучший production-путь для SaaS: один одобренный Meta App у владельца платформы, пользователи просто подключают свои Instagram Professional аккаунты.
 
 ## Render deploy
 
-1. Залей проект в GitHub.
-2. Render → New → Blueprint или Web Service.
-3. Добавь PostgreSQL.
-4. Environment:
+Лучший способ: Render → New → Blueprint → выбрать репозиторий с `render.yaml`.
+
+Минимальные env vars:
 
 ```env
-DATABASE_URL=...
 APP_BASE_URL=https://your-service.onrender.com
-INSTAGRAM_CLIENT_ID=...
-INSTAGRAM_CLIENT_ID=
-META_APP_ID=... # optional fallback
-META_APP_SECRET=...
-META_WEBHOOK_VERIFY_TOKEN=любая_строка
-META_GRAPH_VERSION=v23.0
+INSTAGRAM_CLIENT_ID=your_instagram_or_meta_app_id
+INSTAGRAM_CLIENT_SECRET=your_app_secret
+META_WEBHOOK_VERIFY_TOKEN=any-long-random-string
 DRY_RUN=false
-OPENAI_API_KEY=...
 ```
 
-## Meta / Instagram API settings
+Можно использовать `META_APP_ID` и `META_APP_SECRET` вместо `INSTAGRAM_CLIENT_ID` / `INSTAGRAM_CLIENT_SECRET`.
 
-Instagram API → Instagram Login:
+## Meta setup
 
-Valid OAuth Redirect URI:
+В Meta Developer Dashboard для Instagram API / Instagram Login добавь redirect URI:
 
 ```text
 https://your-service.onrender.com/auth/instagram/callback
 ```
 
-Webhooks:
-
-Callback URL:
+Webhook callback:
 
 ```text
 https://your-service.onrender.com/webhook/instagram
 ```
 
-Verify token: same as `META_WEBHOOK_VERIFY_TOKEN`.
+Verify token должен совпадать с `META_WEBHOOK_VERIFY_TOKEN`.
 
-Subscribe fields:
+Подписанные поля:
 
 ```text
 comments
@@ -71,48 +65,30 @@ messaging_postbacks
 messaging_seen
 ```
 
-## Debug
+## Проверка
 
-After deploy, open:
+Открой:
 
 ```text
 /api/auth/debug
-/api/meta/debug
-/api/webhook/events
-/api/logs
-/api/debug/match?text=апикор
 ```
 
-`/api/auth/debug` should show:
+Проверь:
 
-```text
-flow: instagram_accounts_login_third_party
-loginUrl: https://www.instagram.com/accounts/login/?...
-thirdPartyUrl: https://www.instagram.com/oauth/authorize/third_party/?...
-```
+- `hasAppId: true`
+- `hasAppSecret: true`
+- `callbackUrl` совпадает с Meta redirect URI
+- `instagramLoginUrl` начинается с `https://www.instagram.com/accounts/login/`
 
-## Important
+## Manual Token Connect
 
-This uses the Instagram-style OAuth screen, but it is still official Meta/Instagram OAuth. It does not bypass Meta policies. Real comments/messages can still be restricted until the app has the required access and is available for the tested Instagram account.
+Если OAuth ещё не проходит, можно временно использовать официальный токен:
 
+1. Meta → Instagram API setup.
+2. Добавить Instagram tester.
+3. Сгенерировать token.
+4. В платформе → Аккаунты → Manual Token Connect.
 
-## Fix for `Missing client_id`
+## Poll fallback
 
-The app now accepts the Instagram client ID from any of these environment variables, in this priority order:
-
-```text
-INSTAGRAM_CLIENT_ID
-INSTAGRAM_APP_ID
-META_APP_ID
-APP_ID
-```
-
-For Instagram Login, prefer setting `INSTAGRAM_CLIENT_ID` to the Instagram API / Instagram Login App ID shown in Meta. After deploy, open `/api/auth/debug` and confirm:
-
-```json
-{
-  "hasAppId": true,
-  "clientIdSource": "INSTAGRAM_CLIENT_ID",
-  "loginUrl": "https://www.instagram.com/accounts/login/...client_id=..."
-}
-```
+Кнопка `Poll comments/messages сейчас` пробует официально получить комментарии и разговоры через API без webhook. Webhooks всё равно лучше и рекомендованы для production.
