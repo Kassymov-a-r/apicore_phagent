@@ -1,99 +1,52 @@
-# IG Agent — Instagram Login API + встроенные настройки
+# IG Agent — Instagram Login API + Detailed Logs
 
-Это новая сборка, где ключи можно задать прямо в интерфейсе во вкладке **Секреты / настройки**.
+Эта сборка добавляет расширенную диагностику прямо в интерфейсе.
 
-## Что уже заполнено в проекте
+## Что нового
 
-В проект добавлены built-in значения:
+- Вкладка **Логи** теперь раскрывает каждое событие.
+- Можно открыть полный JSON лога, связанный webhook event, request/response payload, проверенные правила и ошибки Meta API.
+- Polling пишет подробные этапы:
+  - `debug_poll_accounts_loaded`
+  - `debug_poll_media_request`
+  - `debug_poll_media_response`
+  - `debug_media_item`
+  - `debug_poll_conversations_request`
+  - `debug_poll_conversations_response`
+  - `poll_finished`
+- Webhook пишет подробные этапы:
+  - `debug_webhook_processing_started`
+  - `debug_webhook_entry`
+  - `debug_change_processed`
+  - `debug_message_processed`
+- Matching пишет `debug_rules_loaded` с полным списком правил и `matchedKeyword`.
 
-- `INSTAGRAM_CLIENT_ID` / `META_APP_ID`: уже заполнены твоим App ID.
-- `INSTAGRAM_CLIENT_SECRET` / `META_APP_SECRET`: уже заполнены твоим текущим App Secret.
-- `META_GRAPH_VERSION`: `v23.0`.
-- `META_WEBHOOK_VERIFY_TOKEN`: `apicore_igagent_verify_2026`.
-- `DRY_RUN`: `false`.
+## Как пользоваться
 
-Приоритет настроек:
+1. Задеплой проект на Render.
+2. Подключи аккаунт через Instagram Login или Manual Token.
+3. Создай правило в разделе **Автоматизации**.
+4. Нажми **Логи → Проверить Instagram сейчас**.
+5. В списке логов нажми **Раскрыть** на любом событии.
 
-1. Значения из вкладки **Секреты / настройки**.
-2. Render Environment.
-3. Built-in значения внутри проекта.
+## Переменные
 
-## Что всё равно нужно для Render
+Минимально можно запускать без PostgreSQL: включится JSON fallback.
 
-Если деплоишь через Blueprint, `render.yaml` сам создаст PostgreSQL и подставит `DATABASE_URL`.
-
-Если деплоишь обычным Web Service, вручную добавь:
-
-```env
-DATABASE_URL=Internal Database URL из Render PostgreSQL
-APP_BASE_URL=https://твой-домен.onrender.com
-```
-
-`APP_BASE_URL` можно также вписать в интерфейсе, но лучше указать в Render Environment.
-
-## Webhook в Meta
-
-Callback URL:
-
-```text
-https://твой-домен.onrender.com/webhook/instagram
-```
-
-Verify Token:
-
-```text
-apicore_igagent_verify_2026
-```
-
-Redirect URI для Instagram Login:
-
-```text
-https://твой-домен.onrender.com/auth/instagram/callback
-```
-
-## Проверка после деплоя
-
-Открой:
-
-```text
-/api/auth/debug
-```
-
-Должно быть:
-
-```json
-{
-  "hasAppId": true,
-  "hasAppSecret": true
-}
-```
-
-## Разделы платформы
-
-- **Setup** — проверка конфигурации.
-- **Аккаунты** — подключение Instagram, ручной token connect, удаление аккаунтов.
-- **Автоматизации** — ключевые слова, ответы на комментарии, ответы в Direct, AI-генератор.
-- **Логи** — входящие события, совпадения, ошибки отправки.
-- **Секреты** — ввод/обновление всех ID, secret, token и OpenAI key.
-- **Debug** — auth debug, webhook events, keyword test, health.
-
-## Важно
-
-Instagram Login API остаётся официальным Meta/Instagram flow. Для стабильной работы на чужих аккаунтах всё равно может понадобиться Live Mode и одобрение permissions. Эта сборка убирает путаницу с env-файлами и позволяет вводить/менять ключи из интерфейса.
-
-## Database fallback
-
-If `DATABASE_URL` is not configured, the app now starts with a local JSON database fallback.
-This is useful for quick testing and single-user MVP mode.
-
-For production, use PostgreSQL and set `DATABASE_URL` in Render. Without PostgreSQL, data may be lost after redeploy unless you attach a Render disk and set:
+Для продакшена желательно:
 
 ```env
-DATA_DIR=/data
+DATABASE_URL=...
+INSTAGRAM_CLIENT_ID=...
+INSTAGRAM_CLIENT_SECRET=...
+META_WEBHOOK_VERIFY_TOKEN=...
+APP_BASE_URL=https://your-service.onrender.com
+OPENAI_API_KEY=...
+DETAILED_LOGS=true
 ```
 
-Health check will show the current mode:
+Чтобы уменьшить количество debug-записей:
 
-```text
-/healthz
+```env
+DETAILED_LOGS=false
 ```

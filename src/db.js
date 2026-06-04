@@ -205,6 +205,9 @@ async function qJson(text, params = []) {
     await saveJsonDb();
     return oneResult(row);
   }
+  if (sql.startsWith('select * from activity_logs where id=')) {
+    return rowsResult(jsonDb.activity_logs.filter(r => r.id === intId(params[0])));
+  }
   if (sql.startsWith('select * from activity_logs')) {
     return rowsResult([...jsonDb.activity_logs].sort((a,b)=>b.id-a.id).slice(0,150));
   }

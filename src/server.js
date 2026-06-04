@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import OpenAI from 'openai';
 import { initDb, q, dbInfo } from './db.js';
 import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret, dryRun } from './config.js';
-import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken } from './instagram.js';
+import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken, listMediaDiagnostics, listConversations } from './instagram.js';
 import { processWebhook, log } from './processor.js';
 import { keywordMatch } from './util.js';
 import { applyBuiltInDefaults, loadSettingsIntoEnv, listSettings, saveSettings } from './settings.js';
@@ -185,6 +185,16 @@ app.get('/api/logs', asyncRoute(async (req,res)=>{
   const { rows } = await q('select * from activity_logs order by id desc limit 150');
   res.json({ logs: rows });
 }));
+app.get('/api/logs/:id', asyncRoute(async (req,res)=>{
+  const { rows } = await q('select * from activity_logs where id=$1', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ ok:false, error:'log_not_found' });
+  let event = null;
+  if (rows[0].event_id) {
+    const er = await q('select * from webhook_events where id=$1', [rows[0].event_id]);
+    event = er.rows[0] || null;
+  }
+  res.json({ ok:true, log: rows[0], event });
+}));
 app.get('/api/webhook/events', asyncRoute(async (req,res)=>{
   const { rows } = await q('select id,object_type,entry_count,change_fields,messaging_count,processed_count,status,error,created_at from webhook_events order by id desc limit 100');
   res.json({ events: rows });
@@ -194,10 +204,65 @@ app.get('/api/webhook/events/:id', asyncRoute(async (req,res)=>{
   res.json(rows[0] || null);
 }));
 
+app.get('/api/debug/state', asyncRoute(async (req,res)=>{
+  const accounts = await q('select * from instagram_accounts where active=true order by id desc');
+  const rules = await q('select r.*, a.username from automation_rules r left join instagram_accounts a on a.id=r.account_id order by r.id desc');
+  const logs = await q('select * from activity_logs order by id desc limit 10');
+  const events = await q('select id,object_type,entry_count,change_fields,messaging_count,processed_count,status,error,created_at from webhook_events order by id desc limit 10');
+  res.json({
+    ok:true,
+    databaseInfo: dbInfo(),
+    accounts: accounts.rows.map(a => ({ id:a.id, username:a.username, ig_user_id:a.ig_user_id, active:a.active, account_type:a.account_type, connection_method:a.connection_method, token_expires_at:a.token_expires_at, token_present: !!a.access_token })),
+    rules: rules.rows.map(r => ({ id:r.id, account_id:r.account_id, account:r.username, name:r.name, enabled:r.enabled, keywords:r.keywords, public_replies_count:(r.public_replies||[]).length, dm_replies_count:(r.dm_replies||[]).length })),
+    latestLogs: logs.rows,
+    latestEvents: events.rows
+  });
+}));
+
 app.post('/api/poll/run', asyncRoute(async (req,res)=>{
   const out = await pollAllAccounts({ verbose:true });
   res.json({ ok:true, message:'Polling finished. Open Logs to see poll_summary / errors / matched replies.', result:out });
 }));
+
+app.get('/api/poll/media-debug', asyncRoute(async (req,res)=>{
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit || process.env.POLL_MEDIA_LIMIT || 50)));
+  const { rows: accounts } = await q('select * from instagram_accounts where active=true order by id desc');
+  const result = [];
+  for (const account of accounts) {
+    try {
+      const media = await listMediaDiagnostics(account.access_token, limit);
+      result.push({
+        accountId: account.id,
+        username: account.username,
+        igUserId: account.ig_user_id,
+        limit,
+        mediaCount: media.data?.length || 0,
+        mediaWithCommentsCount: media.diagnostics.filter(x => Number(x.comments_count || 0) > 0).length,
+        mediaWithFetchedComments: media.diagnostics.filter(x => x.fetched_comments > 0).length,
+        media: media.diagnostics
+      });
+    } catch (e) {
+      result.push({ accountId: account.id, username: account.username, ok:false, error: e.message });
+    }
+  }
+  res.json({ ok:true, accounts: result });
+}));
+
+app.get('/api/poll/conversations-debug', asyncRoute(async (req,res)=>{
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit || 10)));
+  const { rows: accounts } = await q('select * from instagram_accounts where active=true order by id desc');
+  const result = [];
+  for (const account of accounts) {
+    try {
+      const conv = await listConversations(account.access_token, limit);
+      result.push({ accountId: account.id, username: account.username, conversationsCount: conv.data?.length || 0, raw: conv });
+    } catch (e) {
+      result.push({ accountId: account.id, username: account.username, ok:false, error: e.message });
+    }
+  }
+  res.json({ ok:true, accounts: result });
+}));
+
 
 app.post('/api/ai/generate', asyncRoute(async (req,res)=>{
   if (!process.env.OPENAI_API_KEY) return res.status(400).json({ ok:false, error:'OPENAI_API_KEY is not configured' });

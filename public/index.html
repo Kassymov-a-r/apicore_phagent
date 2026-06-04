@@ -1,18 +1,156 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>IG Agent — Instagram Login</title><style>
-:root{--bg:#071024;--panel:#101b38;--muted:#91a0bd;--text:#f5f7ff;--line:#25345d;--brand:#7c5cff;--bad:#ff6b6b;--ok:#25d695;--warn:#ffd166}*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,Arial;background:var(--bg);color:var(--text)}a{color:inherit}.app{display:grid;grid-template-columns:250px 1fr;min-height:100vh}.side{padding:24px;border-right:1px solid #172241;background:#050b1a;position:sticky;top:0;height:100vh}.logo{font-weight:900;margin-bottom:26px;line-height:1.1}.nav button{display:block;width:100%;background:transparent;color:var(--muted);border:0;text-align:left;padding:13px 14px;border-radius:12px;font-weight:800;cursor:pointer}.nav button.active,.nav button:hover{background:#142044;color:white}.main{padding:28px;max-width:1240px}.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;margin:14px 0}.btn{background:var(--brand);color:white;border:0;border-radius:12px;padding:12px 16px;font-weight:900;cursor:pointer;text-decoration:none;display:inline-block}.btn.secondary{background:#1b2a55}.btn.danger{background:#7c2430}.btn.ok{background:#176c54}.input,textarea,select{width:100%;background:#07132b;color:white;border:1px solid var(--line);border-radius:12px;padding:12px;margin:6px 0 12px}textarea{min-height:90px}.muted{color:var(--muted)}.pill{display:inline-block;padding:4px 9px;border-radius:999px;background:#0f2e38;color:#5df0c0;border:1px solid #1e655f;font-size:12px}.pill.warn{background:#3b2d11;color:#ffd166;border-color:#86651d}.pill.bad{background:#391720;color:#ff8aa0;border-color:#7c2430}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.hidden{display:none}pre{white-space:pre-wrap;word-break:break-word;background:#061027;border:1px solid var(--line);border-radius:12px;padding:12px;max-height:520px;overflow:auto}.small{font-size:13px}.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:800px){.app{grid-template-columns:1fr}.side{height:auto;position:relative}.two{grid-template-columns:1fr}}</style></head><body><div class="app"><aside class="side"><div class="logo">IG Agent<br><span class="muted small">Official Instagram Login</span></div><div class="nav"><button class="active" onclick="show('setup',this)">✅ Setup</button><button onclick="show('accounts',this)">📱 Аккаунты</button><button onclick="show('rules',this)">⚡ Автоматизации</button><button onclick="show('logs',this)">📜 Логи</button><button onclick="show('settings',this)">🔐 Секреты</button><button onclick="show('debug',this)">🛠 Debug</button></div></aside><main class="main">
-<section id="setup"><h1>Setup: Instagram Integration</h1><div class="card"><h3>Что реально возможно</h3><p>Официально есть два нормальных варианта: <b>Instagram Login API</b> для новых интеграций и <b>Facebook Login fallback</b> для старого Page-flow. Для публичных клиентов нужны Live Mode/App Review. Для своих тестовых аккаунтов можно работать в Development, если аккаунты добавлены как tester и permissions доступны.</p><div class="row"><button class="btn secondary" onclick="debugMeta()">Проверить конфиг</button><button class="btn secondary" onclick="settingsLoad()">Проверить секреты</button><a class="btn" href="/auth/instagram">Продолжить с Instagram</a></div></div><div id="setupOut"></div></section>
-<section id="accounts" class="hidden"><h1>Аккаунты</h1><p class="muted">Рекомендуемый вход — кнопка Instagram Login. Если OAuth ещё не готов, можно временно подключить официальный long-lived token вручную.</p><div class="row"><a class="btn" href="/auth/instagram">Продолжить с Instagram</a><a class="btn secondary" href="/auth/instagram/direct">Direct API URL</a><a class="btn secondary" href="/auth/facebook-fallback">Facebook fallback</a><button class="btn ok" onclick="runPoll()">Проверить Instagram сейчас</button></div><div class="card"><h3>Manual Token Connect</h3><p class="muted small">Для теста можно вставить официальный Instagram User Access Token, созданный в Meta → Instagram API setup. Пароль Instagram не нужен.</p><textarea id="manualToken" placeholder="Instagram access token"></textarea><button class="btn secondary" onclick="manualTokenConnect()">Подключить токен</button></div><div id="accountsList"></div></section>
-<section id="rules" class="hidden"><h1>Автоматизации</h1><div class="card"><h3>Создать правило</h3><label>Аккаунт</label><select id="ruleAccount"></select><label>Название</label><input class="input" id="ruleName" value="Апикор"/><label>Ключевые слова, по одному на строку</label><textarea id="keywords">апикор</textarea><div class="row"><button class="btn secondary" onclick="ai('comment')">AI: ответы на комментарии</button><button class="btn secondary" onclick="ai('dm')">AI: ответы в Direct</button></div><label>Ответы на комментарий, по одному на строку</label><textarea id="publicReplies">Спасибо за комментарий! Написали вам 👌</textarea><label>Ответы в Direct, по одному на строку</label><textarea id="dmReplies">Спасибо за интерес! Вот информация: https://apicore.kz</textarea><button class="btn" onclick="createRule()">Сохранить правило</button></div><div class="card"><h3>Тест правила без Instagram</h3><p class="muted small">Проверяет, сработает ли ключевое слово, и записывает результат в Логи. Это не отправляет ответ в Instagram.</p><input class="input" id="ruleTestText" value="апикор"><div class="row"><button class="btn secondary" onclick="testRule('comment')">Тест комментария</button><button class="btn secondary" onclick="testRule('dm')">Тест Direct</button></div><pre id="ruleTestOut"></pre></div><div id="rulesList"></div></section>
-<section id="logs" class="hidden"><h1>Логи</h1><p class="muted">Если webhook не приходит, нажми ручную проверку. Теперь даже пустой polling создаёт запись poll_summary, чтобы было видно, что проверка реально запускалась.</p><div class="row"><button class="btn secondary" onclick="loadLogs()">Обновить</button><button class="btn ok" onclick="runPoll()">Проверить Instagram сейчас</button></div><div id="logsList"></div></section>
-<section id="settings" class="hidden"><h1>Секреты / настройки</h1><div class="card"><p class="muted">Здесь можно ввести все нужные данные: App ID, App Secret, Verify Token, OpenAI Key, APP_BASE_URL и другие параметры. Значения сохраняются в базе и сразу используются кодом.</p><p class="small muted">Если поле показывает source = built-in, значит оно уже зашито в проект. Если хочешь заменить — просто введи новое значение и нажми Сохранить.</p><div class="row"><button class="btn secondary" onclick="settingsResetBuiltins()">Использовать встроенные значения</button><button class="btn secondary" onclick="debugMeta()">Проверить OAuth URL</button></div><div id="settingsForm"></div><button class="btn" onclick="settingsSave()">Сохранить</button></div></section>
-<section id="debug" class="hidden"><h1>Debug</h1><div class="row"><button class="btn secondary" onclick="debugMeta()">Meta/Auth Debug</button><button class="btn secondary" onclick="events()">Webhook Events</button><button class="btn secondary" onclick="matchTest()">Test keyword</button><button class="btn secondary" onclick="health()">Health</button></div><input class="input" id="matchText" value="апикор"/><pre id="debugOut"></pre></section>
-</main></div><script>
-const $=s=>document.querySelector(s);function lines(id){return $('#'+id).value.split('\n').map(x=>x.trim()).filter(Boolean)}function show(id,b){document.querySelectorAll('main section').forEach(s=>s.classList.add('hidden'));$('#'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active'); if(id==='accounts')loadAccounts(); if(id==='rules')loadRules(); if(id==='logs')loadLogs(); if(id==='settings')settingsLoad(); if(id==='setup')setup();}
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IG Agent — Instagram Login</title>
+  <style>
+    :root{--bg:#0b1020;--panel:#111833;--panel2:#182142;--text:#eef2ff;--muted:#9aa7c7;--border:#29345f;--accent:#7c3aed;--ok:#10b981;--warn:#f59e0b;--bad:#ef4444;--debug:#38bdf8}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#090d1b,#111827);color:var(--text);font-family:Inter,Arial,sans-serif}.layout{display:flex;min-height:100vh}.side{width:265px;background:#080c19;border-right:1px solid var(--border);padding:18px;position:sticky;top:0;height:100vh}.brand{font-size:20px;font-weight:800;margin-bottom:6px}.hint{color:var(--muted);font-size:12px;line-height:1.45}.nav button{display:block;width:100%;margin:8px 0;padding:12px 14px;text-align:left;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:12px;cursor:pointer}.nav button.active,.nav button:hover{background:var(--panel2);border-color:#5362a0}.main{flex:1;padding:24px;max-width:1220px}h1{margin:0 0 14px}h2,h3{margin:0 0 10px}.card{background:rgba(17,24,51,.88);border:1px solid var(--border);border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 12px 40px rgba(0,0,0,.16)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.input,textarea,select{width:100%;padding:12px 13px;border-radius:12px;border:1px solid var(--border);background:#070b16;color:var(--text);margin:6px 0 12px}textarea{min-height:96px;resize:vertical}.btn{background:var(--accent);color:white;border:0;border-radius:12px;padding:11px 14px;font-weight:700;cursor:pointer}.btn.secondary{background:#263153}.btn.ok{background:var(--ok)}.btn.warn{background:var(--warn);color:#111}.btn.danger{background:var(--bad)}.muted{color:var(--muted)}.small{font-size:12px}.hidden{display:none}.pill{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;background:#164e3a;color:#b9f6d4;font-size:12px;font-weight:700}.pill.bad{background:#4a1620;color:#fecdd3}.pill.warn{background:#4a3410;color:#fde68a}.pill.debug{background:#09384b;color:#bae6fd}.pill.neutral{background:#263153;color:#cbd5e1}pre{white-space:pre-wrap;word-break:break-word;background:#060914;border:1px solid var(--border);border-radius:12px;padding:12px;max-height:520px;overflow:auto}.log-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.log-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.log-details{display:none;margin-top:12px}.log-details.open{display:block}.debug-status{color:#7dd3fc}.status-error{color:#fecdd3}.status-sent{color:#bbf7d0}.status-ignored{color:#fde68a}.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#060914;border:1px solid var(--border);padding:2px 6px;border-radius:6px}.kv{display:grid;grid-template-columns:180px 1fr;gap:8px;font-size:13px}.divider{height:1px;background:var(--border);margin:14px 0}.copy{font-size:12px;padding:7px 9px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.tabs button{padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:#070b16;color:var(--text);cursor:pointer}.tabs button:hover{background:var(--panel2)}
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <div class="brand">IG Agent</div>
+    <div class="hint">Instagram Login API + правила + AI + детальные логи.</div>
+    <div class="divider"></div>
+    <div class="nav">
+      <button class="active" onclick="show('setup',this)">🚀 Старт</button>
+      <button onclick="show('accounts',this)">👤 Аккаунты</button>
+      <button onclick="show('rules',this)">⚡ Автоматизации</button>
+      <button onclick="show('logs',this)">📜 Логи</button>
+      <button onclick="show('settings',this)">🔐 Секреты</button>
+      <button onclick="show('debug',this)">🧪 Debug</button>
+    </div>
+  </aside>
+  <main class="main">
+    <section id="setup">
+      <h1>Старт</h1>
+      <div id="setupOut"></div>
+      <div class="card">
+        <h3>Что делать сейчас</h3>
+        <p class="muted">1) Подключи аккаунт через Instagram Login или Manual Token. 2) Создай правило. 3) Нажми «Проверить Instagram сейчас». 4) Открой «Логи» и раскрой событие.</p>
+        <div class="row">
+          <a class="btn" href="/auth/instagram">Подключить Instagram</a>
+          <button class="btn secondary" onclick="debugMeta()">Проверить OAuth URL</button>
+          <button class="btn secondary" onclick="stateDebug()">Состояние системы</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="accounts" class="hidden">
+      <h1>Аккаунты</h1>
+      <div class="card">
+        <h3>Подключение</h3>
+        <div class="row"><a class="btn" href="/auth/instagram">Подключить Instagram</a><a class="btn secondary" href="/auth/instagram/direct">Direct OAuth URL</a><a class="btn secondary" href="/auth/facebook-fallback">Facebook fallback</a></div>
+        <div class="divider"></div>
+        <h3>Manual Token Connect</h3>
+        <p class="muted">Вставь официальный токен Instagram API. Пароль от Instagram не нужен.</p>
+        <textarea id="manualToken" placeholder="Instagram access token"></textarea>
+        <button class="btn ok" onclick="manualTokenConnect()">Подключить токен</button>
+      </div>
+      <div class="row"><button class="btn secondary" onclick="loadAccounts()">Обновить</button><button class="btn ok" onclick="runPoll()">Проверить Instagram сейчас</button></div>
+      <div id="accountsList"></div>
+    </section>
+
+    <section id="rules" class="hidden">
+      <h1>Автоматизации</h1>
+      <div class="grid">
+        <div class="card">
+          <h3>Создать правило</h3>
+          <label>Аккаунт</label><select id="ruleAccount"></select>
+          <label>Название</label><input class="input" id="ruleName" value="Апикор">
+          <label>Ключевые слова, каждое с новой строки</label><textarea id="keywords">апикор
+apicore</textarea>
+          <label>Ответы на комментарии</label><textarea id="publicReplies">Спасибо! Отправили информацию 👌
+Написал вам в директ 📩</textarea>
+          <div class="row"><button class="btn secondary" onclick="ai('comment')">AI: сгенерировать ответы на комментарии</button></div>
+          <label>Ответы в Direct</label><textarea id="dmReplies">Здравствуйте! Вот ссылка:
+https://apicore.kz/ru</textarea>
+          <div class="row"><button class="btn secondary" onclick="ai('direct message')">AI: сгенерировать Direct</button></div>
+          <button class="btn ok" onclick="createRule()">Сохранить правило</button>
+        </div>
+        <div class="card">
+          <h3>Тест правила без Instagram</h3>
+          <p class="muted">Проверяет keyword matching и пишет подробную запись в логи.</p>
+          <input class="input" id="ruleTestText" value="апикор">
+          <div class="row"><button class="btn secondary" onclick="testRule('comment')">Тест комментария</button><button class="btn secondary" onclick="testRule('dm')">Тест Direct</button></div>
+          <pre id="ruleTestOut"></pre>
+        </div>
+      </div>
+      <div id="rulesList"></div>
+    </section>
+
+    <section id="logs" class="hidden">
+      <h1>Логи</h1>
+      <p class="muted">Нажми на событие или кнопку «Раскрыть», чтобы увидеть полный JSON: request, response, payload, ошибки, проверенные правила.</p>
+      <div class="row">
+        <button class="btn secondary" onclick="loadLogs()">Обновить</button>
+        <button class="btn ok" onclick="runPoll()">Проверить Instagram сейчас</button>
+        <button class="btn secondary" onclick="mediaDebug()">Диагностика медиа</button>
+        <button class="btn secondary" onclick="convDebug()">Диагностика Direct</button>
+        <button class="btn secondary" onclick="stateDebug('pollDebugOut')">Состояние системы</button>
+      </div>
+      <pre id="pollDebugOut"></pre>
+      <div id="logsList"></div>
+    </section>
+
+    <section id="settings" class="hidden">
+      <h1>Секреты / настройки</h1>
+      <div class="card">
+        <p class="muted">Код сначала берёт настройки из этой вкладки, потом из Render Environment, потом из встроенных значений.</p>
+        <div class="row"><button class="btn secondary" onclick="settingsResetBuiltins()">Использовать встроенные значения</button><button class="btn secondary" onclick="debugMeta()">Проверить OAuth URL</button></div>
+        <div id="settingsForm"></div>
+        <button class="btn ok" onclick="settingsSave()">Сохранить</button>
+      </div>
+    </section>
+
+    <section id="debug" class="hidden">
+      <h1>Debug</h1>
+      <div class="row"><button class="btn secondary" onclick="debugMeta()">Auth Debug</button><button class="btn secondary" onclick="events()">Webhook Events</button><button class="btn secondary" onclick="stateDebug()">State</button><button class="btn secondary" onclick="matchTest()">Test keyword</button><button class="btn secondary" onclick="health()">Health</button></div>
+      <input class="input" id="matchText" value="апикор">
+      <pre id="debugOut"></pre>
+    </section>
+  </main>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+function lines(id){return $('#'+id).value.split('\n').map(x=>x.trim()).filter(Boolean)}
+function escapeHtml(s){return String(s ?? '').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function statusClass(s){ if(['error','poll_finished_with_errors'].includes(s)) return 'bad'; if(['ignored','received','duplicate'].includes(s)) return 'warn'; if(['debug_webhook_processing_started','debug_webhook_entry','debug_rules_loaded','debug_comment_received','debug_dm_received','debug_poll_media_request','debug_poll_media_response','debug_poll_conversations_request','debug_poll_conversations_response','debug_poll_started','debug_poll_accounts_loaded','debug_media_item','debug_poll_comment_found','debug_poll_message_found'].includes(s)) return 'debug'; return ''; }
+function pretty(obj){ try{return JSON.stringify(obj,null,2)}catch{return String(obj)} }
 async function api(url,opt){const r=await fetch(url,opt); const t=await r.text(); let data; try{data=JSON.parse(t)}catch{data={raw:t}}; if(!r.ok) throw new Error(data.error||t); return data}
-async function setup(){try{const d=await api('/api/auth/debug');const missing=[]; if(!d.hasAppId)missing.push('INSTAGRAM_CLIENT_ID / META_APP_ID'); if(!d.hasAppSecret)missing.push('META_APP_SECRET / INSTAGRAM_CLIENT_SECRET'); if(!d.requiredMetaSetup?.webhookVerifyTokenConfigured)missing.push('META_WEBHOOK_VERIFY_TOKEN'); $('#setupOut').innerHTML=`<div class=card><h3>Статус</h3>${missing.length?`<p><span class="pill bad">missing</span> ${missing.join(', ')}</p>`:'<p><span class="pill">OK</span> основные ключи настроены</p>'}<p><b>Redirect URI:</b><br><code>${d.callbackUrl}</code></p><p><b>Webhook URL:</b><br><code>${d.requiredMetaSetup?.webhookCallbackUrl}</code></p><p><b>Scopes:</b> ${d.scopes.join(', ')}</p></div>`}catch(e){$('#setupOut').innerHTML=`<div class=card><span class="pill bad">error</span> ${e.message}</div>`}}
-async function loadAccounts(){try{const d=await api('/api/accounts');$('#accountsList').innerHTML=d.accounts.map(a=>`<div class=card><h2>@${a.username||a.ig_user_id}</h2><div class=muted>IG ID: ${a.ig_user_id}</div><div>Тип: ${a.account_type||'—'} · Метод: ${a.connection_method||'—'} · <span class=pill>${a.active?'active':'off'}</span></div><div class=small>Token expires: ${a.token_expires_at||'unknown'}</div><div class=row><button class="btn secondary" onclick="refreshToken(${a.id})">Refresh token</button><button class="btn danger" onclick="delAccount(${a.id})">Удалить</button></div></div>`).join('')||'<div class=card>Пока нет аккаунтов</div>'; const sel=$('#ruleAccount'); if(sel){sel.innerHTML=d.accounts.map(a=>`<option value="${a.id}">@${a.username}</option>`).join('')}}catch(e){$('#accountsList').innerHTML=`<div class=card>${e.message}</div>`}}
-async function refreshToken(id){try{alert(JSON.stringify(await api('/api/accounts/'+id+'/refresh-token',{method:'POST'}),null,2));loadAccounts()}catch(e){alert(e.message)}}async function manualTokenConnect(){try{const token=$('#manualToken').value.trim(); const d=await api('/api/accounts/manual-token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({access_token:token})}); alert('Подключено: '+(d.account.username||d.account.ig_user_id)); $('#manualToken').value=''; loadAccounts()}catch(e){alert(e.message)}}
-async function delAccount(id){if(!confirm('Удалить аккаунт и связанные правила?'))return;await api('/api/accounts/'+id,{method:'DELETE'});loadAccounts()}async function createRule(){try{const body={account_id:+$('#ruleAccount').value,name:$('#ruleName').value,keywords:lines('keywords'),public_replies:lines('publicReplies'),dm_replies:lines('dmReplies')};await api('/api/rules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});loadRules()}catch(e){alert(e.message)}}async function loadRules(){await loadAccounts();const d=await api('/api/rules');$('#rulesList').innerHTML=d.rules.map(r=>`<div class=card><h3>${r.name} <span class=pill>@${r.username}</span></h3><div>Keywords: ${(r.keywords||[]).join(', ')}</div><div class=muted>Comment replies: ${(r.public_replies||[]).length}; DM replies: ${(r.dm_replies||[]).length}</div><button class="btn danger" onclick="delRule(${r.id})">Удалить</button></div>`).join('')||'<div class=card>Правил нет</div>'}async function delRule(id){await api('/api/rules/'+id,{method:'DELETE'});loadRules()}async function loadLogs(){const d=await api('/api/logs');$('#logsList').innerHTML=d.logs.map(l=>`<div class=card><b>${new Date(l.created_at).toLocaleString()}</b> <span class="pill ${l.status==='error'?'bad':l.status==='ignored'?'warn':''}">${l.status}</span><div class=muted>${l.source||''} @${l.username||l.sender_id||'—'}</div><p>${escapeHtml(l.text||'')}</p><p class=muted>${escapeHtml(l.reason||'')}</p>${l.response?`<pre>${escapeHtml(l.response)}</pre>`:''}</div>`).join('')||'<div class=card>Логов нет</div>'}
-async function runPoll(){try{const d=await api('/api/poll/run',{method:'POST'}); const out=document.querySelector('#debugOut'); if(out) out.textContent=JSON.stringify(d,null,2); alert('Проверка завершена. Открой Логи: появится poll_summary или ошибка API.'); loadLogs()}catch(e){alert(e.message)}}async function debugMeta(){ const d=await api('/api/auth/debug'); $('#debugOut').textContent=JSON.stringify(d,null,2); setup(); }async function events(){ $('#debugOut').textContent=JSON.stringify(await api('/api/webhook/events'),null,2)}async function health(){ $('#debugOut').textContent=JSON.stringify(await api('/healthz'),null,2)}async function matchTest(){ $('#debugOut').textContent=JSON.stringify(await api('/api/debug/match?text='+encodeURIComponent($('#matchText').value)),null,2)}async function ai(type){const topic=prompt('О чём ответы?', 'апикор, консультация, ссылка'); if(!topic)return; try{const d=await api('/api/ai/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({topic,type,count:5,tone:'friendly'})}); if(!d.ok)return alert(d.error); const id=type==='comment'?'publicReplies':'dmReplies'; $('#'+id).value=d.items.join('\n')}catch(e){alert(e.message)}}
-async function testRule(source){try{const d=await api('/api/debug/test-rule',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:$('#ruleTestText').value,source})}); $('#ruleTestOut').textContent=JSON.stringify(d,null,2); loadLogs()}catch(e){alert(e.message)}}
-async function settingsLoad(){try{const d=await api('/api/settings'); $('#settingsForm').innerHTML=d.settings.map(s=>`<label>${s.key} <span class="pill ${s.configured?'':'bad'}">${s.source}</span></label><input class=input data-key="${s.key}" value="${s.value||''}" placeholder="${s.secret?'secret value':''}">`).join('')}catch(e){$('#settingsForm').innerHTML=`<div class=card>${e.message}</div>`}}async function settingsSave(){const body={}; document.querySelectorAll('#settingsForm input').forEach(i=>body[i.dataset.key]=i.value); try{const d=await api('/api/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); alert('Сохранено'); settingsLoad(); setup()}catch(e){alert(e.message)}}async function settingsResetBuiltins(){try{await api('/api/settings/reset-builtins',{method:'POST'}); alert('Встроенные значения применены'); settingsLoad(); setup()}catch(e){alert(e.message)}}function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}setup();loadAccounts();</script></body></html>
+function show(id,b){document.querySelectorAll('main section').forEach(s=>s.classList.add('hidden'));$('#'+id).classList.remove('hidden');document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));b.classList.add('active'); if(id==='accounts')loadAccounts(); if(id==='rules')loadRules(); if(id==='logs')loadLogs(); if(id==='settings')settingsLoad(); if(id==='setup')setup();}
+
+async function setup(){try{const d=await api('/api/auth/debug');const missing=[]; if(!d.hasAppId)missing.push('INSTAGRAM_CLIENT_ID / META_APP_ID'); if(!d.hasAppSecret)missing.push('META_APP_SECRET / INSTAGRAM_CLIENT_SECRET'); if(!d.requiredMetaSetup?.webhookVerifyTokenConfigured)missing.push('META_WEBHOOK_VERIFY_TOKEN'); $('#setupOut').innerHTML=`<div class=card><h3>Статус</h3>${missing.length?`<p><span class="pill bad">missing</span> ${missing.join(', ')}</p>`:'<p><span class="pill">OK</span> основные ключи настроены</p>'}<div class="kv"><b>Redirect URI</b><code>${escapeHtml(d.callbackUrl)}</code><b>Webhook URL</b><code>${escapeHtml(d.requiredMetaSetup?.webhookCallbackUrl||'')}</code><b>Scopes</b><span>${escapeHtml((d.scopes||[]).join(', '))}</span></div></div>`}catch(e){$('#setupOut').innerHTML=`<div class=card><span class="pill bad">error</span> ${escapeHtml(e.message)}</div>`}}
+async function loadAccounts(){try{const d=await api('/api/accounts');$('#accountsList').innerHTML=d.accounts.map(a=>`<div class=card><h2>@${escapeHtml(a.username||a.ig_user_id)}</h2><div class=muted>IG ID: ${escapeHtml(a.ig_user_id)}</div><div>Тип: ${escapeHtml(a.account_type||'—')} · Метод: ${escapeHtml(a.connection_method||'—')} · <span class=pill>${a.active?'active':'off'}</span></div><div class=small>Token expires: ${escapeHtml(a.token_expires_at||'unknown')}</div><div class=row><button class="btn secondary" onclick="refreshToken(${a.id})">Refresh token</button><button class="btn danger" onclick="delAccount(${a.id})">Удалить</button></div></div>`).join('')||'<div class=card>Пока нет аккаунтов</div>'; const sel=$('#ruleAccount'); if(sel){sel.innerHTML=d.accounts.map(a=>`<option value="${a.id}">@${escapeHtml(a.username)}</option>`).join('')}}catch(e){$('#accountsList').innerHTML=`<div class=card>${escapeHtml(e.message)}</div>`}}
+async function refreshToken(id){try{alert(JSON.stringify(await api('/api/accounts/'+id+'/refresh-token',{method:'POST'}),null,2));loadAccounts()}catch(e){alert(e.message)}}
+async function manualTokenConnect(){try{const token=$('#manualToken').value.trim(); const d=await api('/api/accounts/manual-token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({access_token:token})}); alert('Подключено: '+(d.account.username||d.account.ig_user_id)); $('#manualToken').value=''; loadAccounts()}catch(e){alert(e.message)}}
+async function delAccount(id){if(!confirm('Удалить аккаунт и связанные правила?'))return;await api('/api/accounts/'+id,{method:'DELETE'});loadAccounts()}
+async function createRule(){try{const body={account_id:+$('#ruleAccount').value,name:$('#ruleName').value,keywords:lines('keywords'),public_replies:lines('publicReplies'),dm_replies:lines('dmReplies')};await api('/api/rules',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});loadRules()}catch(e){alert(e.message)}}
+async function loadRules(){await loadAccounts();const d=await api('/api/rules');$('#rulesList').innerHTML=d.rules.map(r=>`<div class=card><h3>${escapeHtml(r.name)} <span class="pill neutral">@${escapeHtml(r.username)}</span></h3><div>Keywords: ${escapeHtml((r.keywords||[]).join(', '))}</div><div class=muted>Comment replies: ${(r.public_replies||[]).length}; DM replies: ${(r.dm_replies||[]).length}</div><button class="btn danger" onclick="delRule(${r.id})">Удалить</button></div>`).join('')||'<div class=card>Правил нет</div>'}
+async function delRule(id){await api('/api/rules/'+id,{method:'DELETE'});loadRules()}
+function renderLog(l){const cls=statusClass(l.status);const detailsId='log-details-'+l.id;const rawPreview=l.raw?`<pre>${escapeHtml(pretty(l.raw))}</pre>`:'';return `<div class=card onclick="toggleDetails(${l.id})"><div class=log-head><div><b>${new Date(l.created_at).toLocaleString()}</b> <span class="pill ${cls}">${escapeHtml(l.status)}</span><div class=muted>${escapeHtml(l.source||'')} @${escapeHtml(l.username||l.sender_id||'—')}</div></div><button class="btn secondary copy" onclick="event.stopPropagation();toggleDetails(${l.id},true)">Раскрыть</button></div><div class=log-meta>${l.account_id?`<span class="pill neutral">account:${l.account_id}</span>`:''}${l.event_id?`<span class="pill neutral">event:${l.event_id}</span>`:''}${l.comment_id?`<span class="pill neutral">comment:${escapeHtml(l.comment_id)}</span>`:''}${l.media_id?`<span class="pill neutral">media:${escapeHtml(l.media_id)}</span>`:''}${l.message_id?`<span class="pill neutral">msg:${escapeHtml(l.message_id).slice(0,40)}</span>`:''}</div>${l.text?`<p>${escapeHtml(l.text)}</p>`:''}${l.reason?`<p class=muted><b>Причина/ошибка:</b> ${escapeHtml(l.reason)}</p>`:''}${l.response?`<p><b>Ответ:</b></p><pre>${escapeHtml(l.response)}</pre>`:''}<div id="${detailsId}" class=log-details><div class=tabs><button onclick="event.stopPropagation();copyLog(${l.id})">Копировать JSON</button><button onclick="event.stopPropagation();loadLogDetails(${l.id})">Обновить детали</button></div><div id="log-json-${l.id}">${rawPreview}</div></div></div>`}
+async function loadLogs(){const d=await api('/api/logs');$('#logsList').innerHTML=d.logs.map(renderLog).join('')||'<div class=card>Логов нет</div>'}
+async function toggleDetails(id, force=false){const el=$('#log-details-'+id); if(!el)return; el.classList.toggle('open', force || !el.classList.contains('open')); if(el.classList.contains('open')) await loadLogDetails(id)}
+async function loadLogDetails(id){try{const d=await api('/api/logs/'+id); $('#log-json-'+id).innerHTML=`<h3>Полная запись лога</h3><pre>${escapeHtml(pretty(d.log))}</pre>${d.event?`<h3>Связанный webhook event</h3><pre>${escapeHtml(pretty(d.event))}</pre>`:''}`}catch(e){$('#log-json-'+id).innerHTML=`<pre>${escapeHtml(e.message)}</pre>`}}
+async function copyLog(id){const d=await api('/api/logs/'+id); await navigator.clipboard.writeText(pretty(d)); alert('JSON скопирован')}
+async function runPoll(){try{const d=await api('/api/poll/run',{method:'POST'}); $('#pollDebugOut').textContent=pretty(d); alert('Проверка завершена. Открой раскрытые логи.'); loadLogs()}catch(e){alert(e.message)}}
+async function mediaDebug(){try{const d=await api('/api/poll/media-debug?limit=50'); $('#pollDebugOut').textContent=pretty(d); loadLogs()}catch(e){alert(e.message)}}
+async function convDebug(){try{const d=await api('/api/poll/conversations-debug?limit=10'); $('#pollDebugOut').textContent=pretty(d); loadLogs()}catch(e){alert(e.message)}}
+async function debugMeta(){ const d=await api('/api/auth/debug'); const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); setup(); }
+async function stateDebug(target='debugOut'){ const d=await api('/api/debug/state'); const out=$('#'+target)||$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); }
+async function events(){ $('#debugOut').textContent=pretty(await api('/api/webhook/events'))}
+async function health(){ $('#debugOut').textContent=pretty(await api('/healthz'))}
+async function matchTest(){ $('#debugOut').textContent=pretty(await api('/api/debug/match?text='+encodeURIComponent($('#matchText').value)))}
+async function ai(type){const topic=prompt('О чём ответы?', 'апикор, консультация, ссылка'); if(!topic)return; try{const d=await api('/api/ai/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({topic,type,count:5,tone:'friendly'})}); if(!d.ok)return alert(d.error); const id=type==='comment'?'publicReplies':'dmReplies'; $('#'+id).value=d.items.join('\n')}catch(e){alert(e.message)}}
+async function testRule(source){try{const d=await api('/api/debug/test-rule',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:$('#ruleTestText').value,source})}); $('#ruleTestOut').textContent=pretty(d); loadLogs()}catch(e){alert(e.message)}}
+async function settingsLoad(){try{const d=await api('/api/settings'); $('#settingsForm').innerHTML=d.settings.map(s=>`<label>${escapeHtml(s.key)} <span class="pill ${s.configured?'':'bad'}">${escapeHtml(s.source)}</span></label><input class=input data-key="${escapeHtml(s.key)}" value="${escapeHtml(s.value||'')}" placeholder="${s.secret?'secret value':''}">`).join('')}catch(e){$('#settingsForm').innerHTML=`<div class=card>${escapeHtml(e.message)}</div>`}}
+async function settingsSave(){const body={}; document.querySelectorAll('#settingsForm input').forEach(i=>body[i.dataset.key]=i.value); try{await api('/api/settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}); alert('Сохранено'); settingsLoad(); setup()}catch(e){alert(e.message)}}
+async function settingsResetBuiltins(){try{await api('/api/settings/reset-builtins',{method:'POST'}); alert('Встроенные значения применены'); settingsLoad(); setup()}catch(e){alert(e.message)}}
+setup(); loadAccounts();
+</script>
+</body>
+</html>

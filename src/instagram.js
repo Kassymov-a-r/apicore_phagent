@@ -156,11 +156,30 @@ export async function sendDm(recipientId, text, token) {
   });
 }
 
-export async function listMediaWithComments(token, limit = 10) {
+export async function listMediaWithComments(token, limit = 50) {
   return graphGet('/me/media', token, {
-    fields: 'id,caption,media_type,timestamp,comments.limit(25){id,text,username,from,timestamp}',
+    // comments_count lets us distinguish "there are really no comments" from "comments edge is not returned".
+    fields: 'id,caption,media_type,media_product_type,permalink,timestamp,comments_count,comments.limit(50){id,text,username,from,timestamp}',
     limit
   });
+}
+
+export async function listMediaDiagnostics(token, limit = 50) {
+  const media = await listMediaWithComments(token, limit);
+  return {
+    ...media,
+    diagnostics: (media.data || []).map(item => ({
+      id: item.id,
+      media_type: item.media_type,
+      media_product_type: item.media_product_type,
+      permalink: item.permalink,
+      caption: item.caption ? String(item.caption).slice(0, 120) : '',
+      timestamp: item.timestamp,
+      comments_count: item.comments_count ?? null,
+      fetched_comments: item.comments?.data?.length || 0,
+      sample_comments: (item.comments?.data || []).slice(0, 3).map(c => ({ id: c.id, username: c.username, text: c.text }))
+    }))
+  };
 }
 
 export async function listConversations(token, limit = 10) {
