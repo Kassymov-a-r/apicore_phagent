@@ -3,10 +3,11 @@ import express from 'express';
 import helmet from 'helmet';
 import OpenAI from 'openai';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { initDb, q, dbInfo } from './db.js';
-import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret, dryRun, graphVersion } from './config.js';
-import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken, listMediaDiagnostics, listConversations } from './instagram.js';
+import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret, dryRun, graphVersion, instagramWebhookFields, requireWebhookSignature } from './config.js';
+import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken, listMediaDiagnostics, listConversations, subscribeInstagramWebhooks, listAppSubscriptions } from './instagram.js';
 import { processWebhook, log } from './processor.js';
 import { keywordMatch } from './util.js';
 import { applyBuiltInDefaults, loadSettingsIntoEnv, listSettings, saveSettings } from './settings.js';
@@ -14,13 +15,39 @@ import { pollAllAccounts } from './poller.js';
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '10mb', verify: (req, res, buf) => { req.rawBody = Buffer.from(buf || ''); } }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 function asyncRoute(fn){ return (req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next); }
 function ownerMode(){ return { id:'owner', role:'owner', noAuth:true }; }
 function decodeState(s='') { try { return JSON.parse(Buffer.from(String(s), 'base64url').toString('utf8')); } catch { return {}; } }
+
+function verifyMetaSignature(req) {
+  const signature = req.get('x-hub-signature-256') || '';
+  const secret = appSecret();
+  if (!signature) return { ok: !requireWebhookSignature(), present: false, required: requireWebhookSignature(), reason: 'missing_x_hub_signature_256' };
+  if (!secret) return { ok: !requireWebhookSignature(), present: true, required: requireWebhookSignature(), reason: 'missing_app_secret' };
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(req.rawBody || Buffer.from('')).digest('hex');
+  const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  return { ok, present: true, required: requireWebhookSignature(), reason: ok ? 'signature_ok' : 'signature_mismatch' };
+}
+function webhookReadiness(req) {
+  const mode = String(process.env.META_APP_MODE || 'development').toLowerCase();
+  return {
+    ok: true,
+    webhookUrl: webhookUrl(req),
+    verifyTokenConfigured: !!process.env.META_WEBHOOK_VERIFY_TOKEN,
+    signatureRequired: requireWebhookSignature(),
+    appMode: mode,
+    liveModeRecommended: true,
+    note: mode === 'live' ? 'App mode is marked live in settings.' : 'Meta docs say Consumer apps must be in Live Mode to receive Instagram webhooks beyond dashboard tests.',
+    subscribedFieldsRequired: instagramWebhookFields,
+    oauthScopes: instagramScopes,
+    pollingMode: 'diagnostic_only',
+    webhookMode: 'primary_for_real_comments_and_messages'
+  };
+}
 
 
 const DATA_DIR = process.env.DATA_DIR || process.env.RENDER_DISK_PATH || path.join(process.cwd(), 'data');
@@ -122,8 +149,12 @@ app.get('/api/auth/debug', (req,res)=>{
     requiredMetaSetup: {
       instagramLoginRedirectUri: callbackUrl(req),
       webhookCallbackUrl: webhookUrl(req),
-      webhookVerifyTokenConfigured: !!process.env.META_WEBHOOK_VERIFY_TOKEN
-    }
+      webhookVerifyTokenConfigured: !!process.env.META_WEBHOOK_VERIFY_TOKEN,
+      webhookFields: instagramWebhookFields,
+      appMode: process.env.META_APP_MODE || 'development',
+      signatureRequired: requireWebhookSignature()
+    },
+    webhookReadiness: webhookReadiness(req)
   });
 });
 
@@ -199,12 +230,18 @@ app.get('/webhook/instagram', (req,res)=>{
 });
 app.get('/webhook/meta', (req,res)=>res.redirect(307, `/webhook/instagram?${new URLSearchParams(req.query).toString()}`));
 app.post('/webhook/instagram', asyncRoute(async (req,res)=>{
+  const sig = verifyMetaSignature(req);
+  if (!sig.ok) {
+    await log({ source:'webhook', status:'forbidden', reason:sig.reason, raw:{ signature:sig, headers:{ 'x-hub-signature-256': req.get('x-hub-signature-256') ? 'present' : 'missing' } } }).catch(()=>{});
+    return res.status(403).json({ ok:false, error:sig.reason });
+  }
   const body = req.body || {};
   const entries = body.entry || [];
   const changeFields = entries.flatMap(e => (e.changes||[]).map(c=>c.field)).filter(Boolean);
   const messagingCount = entries.reduce((s,e)=>s+(e.messaging?.length||0),0);
+  const rawEvent = { ...body, _meta: { signature:sig, receivedAt:new Date().toISOString(), webhookReadiness:webhookReadiness(req) } };
   const { rows } = await q(`insert into webhook_events(object_type,raw_event,entry_count,change_fields,messaging_count,status)
-    values($1,$2,$3,$4,$5,'received') returning id`, [body.object || 'unknown', JSON.stringify(body), entries.length, changeFields, messagingCount]);
+    values($1,$2,$3,$4,$5,'received') returning id`, [body.object || 'unknown', JSON.stringify(rawEvent), entries.length, changeFields, messagingCount]);
   const eventId = rows[0].id;
   res.json({ ok:true, eventId });
   processWebhook(eventId, body).catch(async e=>{
@@ -278,6 +315,25 @@ app.get('/api/webhook/events', asyncRoute(async (req,res)=>{
 app.get('/api/webhook/events/:id', asyncRoute(async (req,res)=>{
   const { rows } = await q('select * from webhook_events where id=$1',[req.params.id]);
   res.json(rows[0] || null);
+}));
+app.get('/api/webhook/status', asyncRoute(async (req,res)=>{
+  let appSubscriptions = null;
+  let subscriptionError = null;
+  try { appSubscriptions = await listAppSubscriptions({}); } catch (e) { subscriptionError = e.message; }
+  res.json({ ok:true, ...webhookReadiness(req), appSubscriptions, subscriptionError });
+}));
+app.post('/api/webhook/subscribe', asyncRoute(async (req,res)=>{
+  const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
+  if (!verifyToken) return res.status(400).json({ ok:false, error:'META_WEBHOOK_VERIFY_TOKEN is not configured' });
+  const fields = Array.isArray(req.body?.fields) && req.body.fields.length ? req.body.fields : instagramWebhookFields;
+  try {
+    const apiResponse = await subscribeInstagramWebhooks({ callbackUrl:webhookUrl(req), verifyToken, fields });
+    await log({ source:'webhook', status:'subscribe_attempt', reason:'instagram_app_subscriptions_success', raw:{ callbackUrl:webhookUrl(req), fields, apiResponse } }).catch(()=>{});
+    res.json({ ok:true, callbackUrl:webhookUrl(req), fields, apiResponse });
+  } catch (e) {
+    await log({ source:'webhook', status:'subscribe_error', reason:e.message, raw:{ callbackUrl:webhookUrl(req), fields } }).catch(()=>{});
+    res.status(400).json({ ok:false, callbackUrl:webhookUrl(req), fields, error:e.message });
+  }
 }));
 
 app.get('/api/debug/state', asyncRoute(async (req,res)=>{

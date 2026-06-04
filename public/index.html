@@ -131,7 +131,7 @@ https://apicore.kz/ru</textarea>
 
     <section id="debug" class="hidden">
       <h1>Debug</h1>
-      <div class="row"><button class="btn secondary" onclick="debugMeta()">Auth Debug</button><button class="btn secondary" onclick="events()">Webhook Events</button><button class="btn secondary" onclick="stateDebug()">State</button><button class="btn secondary" onclick="matchTest()">Test keyword</button><button class="btn secondary" onclick="health()">Health</button></div>
+      <div class="row"><button class="btn secondary" onclick="debugMeta()">Auth Debug</button><button class="btn secondary" onclick="events()">Webhook Events</button><button class="btn secondary" onclick="webhookStatus()">Webhook Status</button><button class="btn secondary" onclick="webhookSubscribe()">Subscribe Webhooks</button><button class="btn secondary" onclick="stateDebug()">State</button><button class="btn secondary" onclick="matchTest()">Test keyword</button><button class="btn secondary" onclick="health()">Health</button></div>
       <input class="input" id="matchText" value="апикор">
       <pre id="debugOut"></pre>
     </section>
@@ -165,6 +165,10 @@ async function mediaDebug(){try{const d=await api('/api/poll/media-debug?limit=5
 async function convDebug(){try{const d=await api('/api/poll/conversations-debug?limit=10'); $('#pollDebugOut').textContent=pretty(d); loadLogs()}catch(e){alert(e.message)}}
 async function debugMeta(){ const d=await api('/api/auth/debug'); const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); setup(); }
 async function stateDebug(target='debugOut'){ const d=await api('/api/debug/state'); const out=$('#'+target)||$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); }
+
+async function webhookStatus(){ const d=await api('/api/webhook/status'); const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); }
+async function webhookSubscribe(){ if(!confirm('Попробовать подписать приложение на Instagram webhook fields через Graph API?')) return; try{ const d=await api('/api/webhook/subscribe',{method:'POST'}); const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=pretty(d); alert('Webhook subscribe выполнен. Проверь Meta и Webhook Events.'); loadLogs(); }catch(e){ const out=$('#debugOut')||$('#pollDebugOut'); if(out) out.textContent=e.message; alert(e.message); }}
+
 async function events(){ $('#debugOut').textContent=pretty(await api('/api/webhook/events'))}
 async function health(){ $('#debugOut').textContent=pretty(await api('/healthz'))}
 async function matchTest(){ $('#debugOut').textContent=pretty(await api('/api/debug/match?text='+encodeURIComponent($('#matchText').value)))}

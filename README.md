@@ -80,3 +80,26 @@ POLL_COMMENT_MAX_PAGES=8
 ```
 
 The logs also redact `access_token` values from `paging.next` URLs.
+
+
+## Webhook-first update based on Meta Webhooks documentation
+
+Meta Webhooks are the primary path for real-time Instagram comments and messages. Polling is now treated as diagnostics only, because Instagram can expose `comments_count` while returning empty `data` for comment objects in development/restricted access.
+
+### Required Meta setup
+
+- Callback URL: `/webhook/instagram`
+- Verify Token: value from `META_WEBHOOK_VERIFY_TOKEN`
+- Object: `instagram`
+- Fields: `comments`, `live_comments`, `mentions`, `messages`, `message_edit`, `message_reactions`, `messaging_postbacks`, `messaging_seen`
+- Consumer apps should be moved to Live Mode after App Review for real non-test webhooks.
+
+### New endpoints
+
+- `GET /api/webhook/status` — shows callback URL, required fields, app mode, app subscriptions if Meta returns them.
+- `POST /api/webhook/subscribe` — attempts to subscribe the app to Instagram webhook fields through the Graph API subscriptions edge.
+- `POST /webhook/instagram` — now captures raw body and validates `X-Hub-Signature-256` when `WEBHOOK_REQUIRE_SIGNATURE=true`.
+
+### Recommended operation
+
+Use webhooks for new comments and messages. Use polling only to prove token/media visibility and diagnose API restrictions.

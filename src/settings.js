@@ -7,7 +7,9 @@ export const BUILTIN_DEFAULTS = {
   META_APP_SECRET: '0faebfc000d4ea91c6645b4997a9ccd8',
   META_GRAPH_VERSION: 'v23.0',
   META_WEBHOOK_VERIFY_TOKEN: 'apicore_igagent_verify_2026',
-  DRY_RUN: 'false'
+  DRY_RUN: 'false',
+  WEBHOOK_REQUIRE_SIGNATURE: 'false',
+  META_APP_MODE: 'development'
 };
 
 export function applyBuiltInDefaults() {
@@ -28,7 +30,9 @@ export const CONFIG_KEYS = [
   'DRY_RUN',
   'OPENAI_API_KEY',
   'IG_USER_ID',
-  'IG_PAGE_ID'
+  'IG_PAGE_ID',
+  'WEBHOOK_REQUIRE_SIGNATURE',
+  'META_APP_MODE'
 ];
 
 export const SECRET_KEYS = new Set(['INSTAGRAM_CLIENT_SECRET','META_APP_SECRET','OPENAI_API_KEY','META_WEBHOOK_VERIFY_TOKEN','DATABASE_URL']);

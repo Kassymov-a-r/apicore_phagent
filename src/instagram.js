@@ -331,3 +331,41 @@ export function publicDebug(req) {
     requiredRedirectUri: callbackUrl(req)
   };
 }
+
+export async function subscribeInstagramWebhooks({ callbackUrl, verifyToken, fields, appId, appAccessToken, version } = {}) {
+  const id = appId || instagramClientId();
+  const token = appAccessToken || (id && appSecret() ? `${id}|${appSecret()}` : '');
+  if (!id) throw new Error('Missing INSTAGRAM_CLIENT_ID / META_APP_ID');
+  if (!token) throw new Error('Missing App Secret for app access token');
+  if (!callbackUrl) throw new Error('Missing webhook callback URL');
+  if (!verifyToken) throw new Error('Missing webhook verify token');
+  const url = new URL(`https://graph.facebook.com/${version || graphVersion()}/${id}/subscriptions`);
+  url.searchParams.set('access_token', token);
+  const body = {
+    object: 'instagram',
+    callback_url: callbackUrl,
+    verify_token: verifyToken,
+    fields: (fields || []).join(',')
+  };
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: asForm(body)
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export async function listAppSubscriptions({ appId, appAccessToken, version } = {}) {
+  const id = appId || instagramClientId();
+  const token = appAccessToken || (id && appSecret() ? `${id}|${appSecret()}` : '');
+  if (!id) throw new Error('Missing INSTAGRAM_CLIENT_ID / META_APP_ID');
+  if (!token) throw new Error('Missing App Secret for app access token');
+  const url = new URL(`https://graph.facebook.com/${version || graphVersion()}/${id}/subscriptions`);
+  url.searchParams.set('access_token', token);
+  const r = await fetch(url);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
