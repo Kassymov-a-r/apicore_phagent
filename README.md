@@ -68,3 +68,15 @@ DETAILED_LOGS=false
 Для полноценного AI-ответа добавь `OPENAI_API_KEY` во вкладке **Секреты** или Render Environment. Если ключ не задан, помощник работает в локальном диагностическом режиме.
 
 Важно: помощник создаёт файлы и инструкции, но не может сам изменить GitHub/Render-деплой. Чтобы применить патч, нужно внести изменения в исходный проект, закоммитить и задеплоить.
+
+## Update: paginated comment edge diagnostics
+
+This build changes comment polling from a single `/{media_id}/comments` request to a paginated fetch. Some Instagram API responses can return `comments_count > 0` and an empty first `data` array while still providing `paging.next`. The poller now follows `paging.next` up to `POLL_COMMENT_MAX_PAGES` pages per media item and logs per-page diagnostics.
+
+New optional env:
+
+```env
+POLL_COMMENT_MAX_PAGES=8
+```
+
+The logs also redact `access_token` values from `paging.next` URLs.

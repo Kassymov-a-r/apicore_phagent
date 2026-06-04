@@ -7,11 +7,37 @@ function asForm(body = {}) {
   return p;
 }
 
+export function scrubSensitive(value) {
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    return value
+      .replace(/access_token=([^&]+)/g, 'access_token=***')
+      .replace(/client_secret=([^&]+)/g, 'client_secret=***');
+  }
+  if (Array.isArray(value)) return value.map(scrubSensitive);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (/token|secret|authorization/i.test(k)) out[k] = v ? '***' : v;
+      else out[k] = scrubSensitive(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export async function graphGet(path, token, params = {}, root = graphBase()) {
   const url = new URL(`${root}${path}`);
   for (const [k, v] of Object.entries(params)) if (v != null) url.searchParams.set(k, v);
   if (token) url.searchParams.set('access_token', token);
   const r = await fetch(url);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(JSON.stringify(data));
+  return data;
+}
+
+export async function graphGetUrl(urlLike) {
+  const r = await fetch(urlLike);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(JSON.stringify(data));
   return data;
@@ -172,39 +198,88 @@ export async function listCommentsForMedia(mediaId, token, limit = 50) {
   });
 }
 
+export async function listCommentsForMediaPaginated(mediaId, token, { pageLimit = 50, maxPages = 8 } = {}) {
+  const diagnostics = {
+    attempted: true,
+    endpoint: `/${mediaId}/comments`,
+    limit: pageLimit,
+    max_pages: maxPages,
+    ok: null,
+    error: null,
+    pages: [],
+    raw: null
+  };
+  const all = [];
+  let page = null;
+  try {
+    page = await listCommentsForMedia(mediaId, token, pageLimit);
+    diagnostics.pages.push({
+      page: 1,
+      data_length: (page.data || []).length,
+      paging: scrubSensitive(page.paging || null)
+    });
+    all.push(...(page.data || []));
+
+    let next = page.paging?.next;
+    let pageNo = 1;
+    while (next && pageNo < maxPages) {
+      pageNo += 1;
+      const nextPage = await graphGetUrl(next);
+      diagnostics.pages.push({
+        page: pageNo,
+        data_length: (nextPage.data || []).length,
+        paging: scrubSensitive(nextPage.paging || null)
+      });
+      all.push(...(nextPage.data || []));
+      next = nextPage.paging?.next;
+      if (all.length >= pageLimit * maxPages) break;
+    }
+
+    diagnostics.ok = true;
+    diagnostics.raw = scrubSensitive({
+      first_page: page,
+      page_count: diagnostics.pages.length,
+      total_fetched: all.length,
+      note: all.length === 0 && diagnostics.pages.length > 1
+        ? 'Instagram returned paging cursors/next pages, but every fetched page had empty data.'
+        : undefined
+    });
+    return { data: all, paging: page?.paging || null, diagnostics };
+  } catch (e) {
+    diagnostics.ok = false;
+    diagnostics.error = e?.message || String(e);
+    diagnostics.raw = scrubSensitive({ first_page: page });
+    return { data: all, paging: page?.paging || null, diagnostics };
+  }
+}
+
 export async function listMediaWithComments(token, limit = 50, commentsLimit = 50) {
   const media = await listMedia(token, limit);
   const out = [];
+  const maxCommentPages = Math.max(1, Number(process.env.POLL_COMMENT_MAX_PAGES || 8));
   for (const item of media.data || []) {
     const copy = { ...item };
     const commentsCount = Number(item.comments_count || 0);
-    copy.comments_fetch = {
-      attempted: commentsCount > 0,
-      endpoint: `/${item.id}/comments`,
-      limit: commentsLimit,
-      ok: null,
-      error: null,
-      raw: null
-    };
     if (commentsCount > 0) {
-      try {
-        const comments = await listCommentsForMedia(item.id, token, commentsLimit);
-        copy.comments = { data: comments.data || [], paging: comments.paging || null };
-        copy.comments_fetch.ok = true;
-        copy.comments_fetch.raw = comments;
-      } catch (e) {
-        copy.comments = { data: [] };
-        copy.comments_fetch.ok = false;
-        copy.comments_fetch.error = e?.message || String(e);
-      }
+      const fetched = await listCommentsForMediaPaginated(item.id, token, { pageLimit: commentsLimit, maxPages: maxCommentPages });
+      copy.comments = { data: fetched.data || [], paging: fetched.paging || null };
+      copy.comments_fetch = fetched.diagnostics;
     } else {
       copy.comments = { data: [] };
-      copy.comments_fetch.ok = true;
-      copy.comments_fetch.raw = { data: [] };
+      copy.comments_fetch = {
+        attempted: false,
+        endpoint: `/${item.id}/comments`,
+        limit: commentsLimit,
+        max_pages: maxCommentPages,
+        ok: true,
+        error: null,
+        pages: [],
+        raw: { data: [] }
+      };
     }
     out.push(copy);
   }
-  return { ...media, data: out, media_raw: media };
+  return { ...media, data: out, media_raw: scrubSensitive(media) };
 }
 
 export async function listMediaDiagnostics(token, limit = 50) {
