@@ -1,19 +1,20 @@
 {
-  "name": "ig-remote-browser-agent",
-  "version": "1.0.2",
+  "name": "ig-instagram-login-agent",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "build": "npx playwright install chromium",
-    "postinstall": "npx playwright install chromium"
-  },
-  "dependencies": {
-    "playwright": "1.56.1",
-    "express": "^4.19.2",
-    "body-parser": "^1.20.2",
-    "multer": "^1.4.5-lts.1"
+    "dev": "node --watch src/server.js"
   },
   "engines": {
     "node": "20.x"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "openai": "^4.77.0",
+    "pg": "^8.13.1"
   }
 }

@@ -1,4 +1,0 @@
-node_modules
-.git
-storage/data/*.json
-storage/sessions/*.json

@@ -1,21 +1,32 @@
 services:
   - type: web
-    name: ig-remote-browser-agent
-    env: docker
-    dockerfilePath: ./Dockerfile
+    name: ig-instagram-login-agent
+    env: node
     plan: starter
-    disk:
-      name: ig-agent-storage
-      mountPath: /app/storage
-      sizeGB: 1
+    buildCommand: npm install
+    startCommand: npm start
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: STORAGE_DIR
-        value: /app/storage
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /ms-playwright
-      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
-        value: "0"
+      - key: NODE_VERSION
+        value: 20.20.2
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ig-instagram-login-agent-db
+          property: connectionString
+      - key: APP_BASE_URL
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: META_GRAPH_VERSION
+        value: v23.0
+      - key: DRY_RUN
+        value: false
       - key: OPENAI_API_KEY
         sync: false
+
+databases:
+  - name: ig-instagram-login-agent-db
+    plan: basic-256mb

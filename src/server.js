@@ -1,214 +1,145 @@
+import 'dotenv/config';
 import express from 'express';
-import bodyParser from 'body-parser';
-import { chromium } from 'playwright';
-import { execFileSync } from 'node:child_process';
-import fs from 'fs/promises';
-import path from 'path';
+import helmet from 'helmet';
+import { initDb, q } from './db.js';
+import { appBaseUrl, callbackUrl, instagramScopes, webhookUrl } from './config.js';
+import { publicDebug, exchangeCodeForToken, exchangeLongLivedToken, getMe } from './instagram.js';
+import { processWebhook } from './processor.js';
+import OpenAI from 'openai';
 
 const app = express();
-const PORT = process.env.PORT || 10000;
-const STORAGE_DIR = process.env.STORAGE_DIR || path.join(process.cwd(), 'storage');
-const DATA_DIR = path.join(STORAGE_DIR, 'data');
-const SESSIONS_DIR = path.join(STORAGE_DIR, 'sessions');
-const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
-const RULES_FILE = path.join(DATA_DIR, 'rules.json');
-const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
-app.use(bodyParser.json({ limit: '2mb' }));
-app.use(express.static(path.join(process.cwd(), 'public')));
+function asyncRoute(fn){ return (req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next); }
 
-const browsers = new Map();
+app.get('/healthz', asyncRoute(async (req,res)=>{
+  let db='missing';
+  try { await q('select 1'); db='connected'; } catch(e) { db=e.message; }
+  res.json({ ok:true, app:'ig-instagram-login-agent', database:db });
+}));
 
-async function ensureStorage() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.mkdir(SESSIONS_DIR, { recursive: true });
-  for (const [file, fallback] of [[ACCOUNTS_FILE, []], [RULES_FILE, []], [LOGS_FILE, []]]) {
-    try { await fs.access(file); } catch { await fs.writeFile(file, JSON.stringify(fallback, null, 2)); }
-  }
-}
-async function readJson(file, fallback=[]) {
-  try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return fallback; }
-}
-async function writeJson(file, value) {
-  await fs.writeFile(file, JSON.stringify(value, null, 2));
-}
-async function addLog(accountId, status, message, meta={}) {
-  const logs = await readJson(LOGS_FILE, []);
-  logs.unshift({ id: Date.now().toString(), accountId, status, message, meta, createdAt: new Date().toISOString() });
-  await writeJson(LOGS_FILE, logs.slice(0, 500));
-}
-function sessionPath(accountId) { return path.join(SESSIONS_DIR, `${accountId}.json`); }
-async function hasSession(accountId) {
-  try { await fs.access(sessionPath(accountId)); return true; } catch { return false; }
-}
-async function getAccount(id) {
-  const accounts = await readJson(ACCOUNTS_FILE, []);
-  return accounts.find(a => String(a.id) === String(id));
-}
-async function closeBrowser(id) {
-  const item = browsers.get(String(id));
-  if (item) {
-    try { await item.context?.close(); } catch {}
-    try { await item.browser?.close(); } catch {}
-    browsers.delete(String(id));
-  }
-}
+app.get('/api/meta/debug', (req,res)=>res.json(publicDebug(req)));
 
-app.get('/healthz', async (req, res) => res.json({ ok: true, app: 'ig-remote-browser-agent' }));
-
-app.get('/api/accounts', async (req, res) => {
-  const accounts = await readJson(ACCOUNTS_FILE, []);
-  const enriched = await Promise.all(accounts.map(async a => ({ ...a, hasSession: await hasSession(a.id), browserOpen: browsers.has(String(a.id)) })));
-  res.json({ accounts: enriched });
+app.get('/auth/instagram', (req,res)=>{
+  const url = new URL('https://www.instagram.com/oauth/authorize');
+  url.searchParams.set('client_id', process.env.META_APP_ID || '');
+  url.searchParams.set('redirect_uri', callbackUrl(req));
+  url.searchParams.set('response_type','code');
+  url.searchParams.set('scope', instagramScopes.join(','));
+  url.searchParams.set('enable_fb_login','0');
+  url.searchParams.set('force_authentication','1');
+  res.redirect(url.toString());
 });
-app.post('/api/accounts', async (req, res) => {
-  const username = String(req.body.username || '').trim().replace('@','');
-  if (!username) return res.status(400).json({ ok:false, error:'username_required' });
-  const accounts = await readJson(ACCOUNTS_FILE, []);
-  const existing = accounts.find(a => a.username.toLowerCase() === username.toLowerCase());
-  if (existing) return res.json({ ok:true, account: existing });
-  const account = { id: Date.now(), username, active: true, createdAt: new Date().toISOString() };
-  accounts.push(account);
-  await writeJson(ACCOUNTS_FILE, accounts);
-  await addLog(account.id, 'account_created', `@${username}`);
-  res.json({ ok:true, account });
+
+app.get('/auth/instagram/callback', asyncRoute(async (req,res)=>{
+  if (req.query.error) return res.redirect(`/?auth_error=${encodeURIComponent(req.query.error_description || req.query.error)}`);
+  const code = req.query.code;
+  if (!code) return res.redirect('/?auth_error=missing_code');
+  const short = await exchangeCodeForToken({ code, redirectUri: callbackUrl(req) });
+  const long = await exchangeLongLivedToken(short.access_token);
+  const token = long.access_token || short.access_token;
+  const me = await getMe(token);
+  const expiresIn = long.expires_in || 60*60*24*60;
+  const expiresAt = new Date(Date.now() + expiresIn*1000).toISOString();
+  await q(`insert into instagram_accounts(ig_user_id,username,access_token,token_expires_at,active,updated_at)
+    values($1,$2,$3,$4,true,now())
+    on conflict(ig_user_id) do update set username=excluded.username, access_token=excluded.access_token, token_expires_at=excluded.token_expires_at, active=true, updated_at=now()`,
+    [String(me.user_id || short.user_id), me.username || `ig_${short.user_id}`, token, expiresAt]);
+  res.redirect('/?connected=1');
+}));
+
+app.get('/webhook/instagram', (req,res)=>{
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === process.env.META_WEBHOOK_VERIFY_TOKEN) return res.status(200).send(challenge);
+  if (!mode) return res.json({ ok:true, message:'Instagram webhook endpoint. Use Meta verification with hub.challenge.', webhookUrl:webhookUrl(req) });
+  return res.sendStatus(403);
 });
-app.delete('/api/accounts/:id', async (req, res) => {
-  const id = String(req.params.id);
-  await closeBrowser(id);
-  const accounts = (await readJson(ACCOUNTS_FILE, [])).filter(a => String(a.id) !== id);
-  const rules = (await readJson(RULES_FILE, [])).filter(r => String(r.accountId) !== id);
-  await writeJson(ACCOUNTS_FILE, accounts);
-  await writeJson(RULES_FILE, rules);
-  try { await fs.rm(sessionPath(id), { force:true }); } catch {}
-  await addLog(id, 'account_deleted', `account ${id}`);
+app.get('/webhook/meta', (req,res)=>res.redirect(307, `/webhook/instagram?${new URLSearchParams(req.query).toString()}`));
+
+app.post('/webhook/instagram', asyncRoute(async (req,res)=>{
+  const body = req.body || {};
+  const entries = body.entry || [];
+  const changeFields = entries.flatMap(e => (e.changes||[]).map(c=>c.field)).filter(Boolean);
+  const messagingCount = entries.reduce((s,e)=>s+(e.messaging?.length||0),0);
+  const { rows } = await q(`insert into webhook_events(object_type,raw_event,entry_count,change_fields,messaging_count,status)
+    values($1,$2,$3,$4,$5,'received') returning id`, [body.object || 'unknown', JSON.stringify(body), entries.length, changeFields, messagingCount]);
+  const eventId = rows[0].id;
+  // Respond immediately to Meta, process async.
   res.json({ ok:true });
+  processWebhook(eventId, body).catch(async e=>{
+    await q('update webhook_events set status=$1,error=$2 where id=$3', ['error', e.message, eventId]).catch(()=>{});
+  });
+}));
+app.post('/webhook/meta', (req,res,next)=>app._router.handle(req,res,next));
+
+app.get('/api/accounts', asyncRoute(async (req,res)=>{
+  const { rows } = await q('select id,ig_user_id,username,active,token_expires_at,created_at from instagram_accounts order by id desc');
+  res.json({ accounts: rows });
+}));
+app.delete('/api/accounts/:id', asyncRoute(async (req,res)=>{
+  await q('delete from instagram_accounts where id=$1', [req.params.id]);
+  res.json({ ok:true });
+}));
+
+app.get('/api/rules', asyncRoute(async (req,res)=>{
+  const { rows } = await q(`select r.*, a.username from automation_rules r left join instagram_accounts a on a.id=r.account_id order by r.id desc`);
+  res.json({ rules: rows });
+}));
+app.post('/api/rules', asyncRoute(async (req,res)=>{
+  const b=req.body;
+  const { rows } = await q(`insert into automation_rules(account_id,name,enabled,keywords,public_replies,dm_replies,reply_to_comments,reply_to_dm)
+    values($1,$2,$3,$4,$5,$6,$7,$8) returning *`, [
+    b.account_id, b.name || 'Rule', b.enabled !== false,
+    b.keywords || [], b.public_replies || [], b.dm_replies || [], b.reply_to_comments !== false, b.reply_to_dm !== false
+  ]);
+  res.json({ ok:true, rule:rows[0] });
+}));
+app.delete('/api/rules/:id', asyncRoute(async (req,res)=>{ await q('delete from automation_rules where id=$1',[req.params.id]); res.json({ok:true}); }));
+
+app.get('/api/logs', asyncRoute(async (req,res)=>{
+  const { rows } = await q('select * from activity_logs order by id desc limit 100');
+  res.json({ logs: rows });
+}));
+app.get('/api/webhook/events', asyncRoute(async (req,res)=>{
+  const { rows } = await q('select id,object_type,entry_count,change_fields,messaging_count,processed_count,status,error,created_at from webhook_events order by id desc limit 100');
+  res.json({ events: rows });
+}));
+app.get('/api/webhook/events/:id', asyncRoute(async (req,res)=>{
+  const { rows } = await q('select * from webhook_events where id=$1',[req.params.id]);
+  res.json(rows[0] || null);
+}));
+
+app.post('/api/ai/generate', asyncRoute(async (req,res)=>{
+  if (!process.env.OPENAI_API_KEY) return res.status(400).json({ ok:false, error:'OPENAI_API_KEY is not configured' });
+  const { topic='Instagram reply', tone='friendly', count=5, type='comment' } = req.body || {};
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const r = await client.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [{ role:'user', content:`Generate ${count} short ${type} reply templates in Russian. Topic: ${topic}. Tone: ${tone}. No numbering, one reply per line.` }],
+    temperature: 0.8
+  });
+  const text = r.choices[0]?.message?.content || '';
+  res.json({ ok:true, items: text.split('\n').map(s=>s.replace(/^[-\d.\s]+/,'').trim()).filter(Boolean) });
+}));
+
+app.get('/api/debug/match', asyncRoute(async (req,res)=>{
+  const text = String(req.query.text || '');
+  const { keywordMatch } = await import('./util.js');
+  const { rows } = await q(`select r.id,r.name,r.keywords,a.username from automation_rules r join instagram_accounts a on a.id=r.account_id where r.enabled=true`);
+  const checked = rows.map(r=>({ ruleId:r.id, ruleName:r.name, account:r.username, keywords:r.keywords, matchedKeyword: keywordMatch(text, r.keywords) }));
+  res.json({ text, matched: checked.some(x=>x.matchedKeyword), checkedRules: checked });
+}));
+
+app.use((err,req,res,next)=>{
+  console.error(err);
+  res.status(500).json({ ok:false, error: err.message });
 });
 
-app.post('/api/browser/:id/start', async (req, res) => {
-  const id = String(req.params.id);
-  const account = await getAccount(id);
-  if (!account) return res.status(404).json({ ok:false, error:'account_not_found' });
-  try {
-    if (browsers.has(id)) return res.json({ ok:true, alreadyOpen:true });
-    let browser;
-    try {
-      browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] });
-    } catch (err) {
-      const msg = String(err?.message || err);
-      if (msg.includes('Executable doesn') || msg.includes('Please run the following command')) {
-        console.warn('[playwright] browser executable missing, installing chromium at runtime...');
-        execFileSync('npx', ['playwright', 'install', 'chromium'], { stdio: 'inherit' });
-        browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'] });
-      } else {
-        throw err;
-      }
-    }
-    const storageState = await hasSession(id) ? sessionPath(id) : undefined;
-    const context = await browser.newContext({
-      storageState,
-      viewport: { width: 390, height: 844 },
-      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
-    });
-    const page = await context.newPage();
-    page.setDefaultTimeout(15000);
-    await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded' });
-    browsers.set(id, { browser, context, page, lastActivity: Date.now() });
-    await addLog(id, 'browser_opened', 'Remote Browser opened');
-    res.json({ ok:true });
-  } catch (error) {
-    await addLog(id, 'browser_error', error.message);
-    res.status(500).json({ ok:false, error:error.message });
-  }
-});
-app.post('/api/browser/:id/goto', async (req, res) => {
-  const item = browsers.get(String(req.params.id));
-  if (!item) return res.status(404).json({ ok:false, error:'browser_not_open' });
-  const url = String(req.body.url || 'https://www.instagram.com/');
-  await item.page.goto(url, { waitUntil:'domcontentloaded' });
-  res.json({ ok:true });
-});
-app.get('/api/browser/:id/screenshot', async (req, res) => {
-  const item = browsers.get(String(req.params.id));
-  if (!item) return res.status(404).send('browser_not_open');
-  try {
-    const buf = await item.page.screenshot({ type: 'jpeg', quality: 70 });
-    res.set('Content-Type', 'image/jpeg');
-    res.set('Cache-Control', 'no-store');
-    res.send(buf);
-  } catch (error) { res.status(500).send(error.message); }
-});
-app.post('/api/browser/:id/click', async (req, res) => {
-  const item = browsers.get(String(req.params.id));
-  if (!item) return res.status(404).json({ ok:false, error:'browser_not_open' });
-  const vp = item.page.viewportSize() || { width:390, height:844 };
-  const x = Number(req.body.x || 0) * vp.width / Number(req.body.width || vp.width);
-  const y = Number(req.body.y || 0) * vp.height / Number(req.body.height || vp.height);
-  await item.page.mouse.click(x, y);
-  res.json({ ok:true });
-});
-app.post('/api/browser/:id/type', async (req, res) => {
-  const item = browsers.get(String(req.params.id));
-  if (!item) return res.status(404).json({ ok:false, error:'browser_not_open' });
-  await item.page.keyboard.type(String(req.body.text || ''), { delay: 30 });
-  res.json({ ok:true });
-});
-app.post('/api/browser/:id/press', async (req, res) => {
-  const item = browsers.get(String(req.params.id));
-  if (!item) return res.status(404).json({ ok:false, error:'browser_not_open' });
-  await item.page.keyboard.press(String(req.body.key || 'Enter'));
-  res.json({ ok:true });
-});
-app.post('/api/browser/:id/save-session', async (req, res) => {
-  const id = String(req.params.id);
-  const item = browsers.get(id);
-  if (!item) return res.status(404).json({ ok:false, error:'browser_not_open' });
-  await item.context.storageState({ path: sessionPath(id) });
-  await addLog(id, 'session_saved', 'Session/cookies saved');
-  res.json({ ok:true });
-});
-app.post('/api/browser/:id/close', async (req, res) => {
-  await closeBrowser(String(req.params.id));
-  res.json({ ok:true });
-});
-
-app.get('/api/rules', async (req,res)=>res.json({ rules: await readJson(RULES_FILE, []) }));
-app.post('/api/rules', async (req,res)=>{
-  const rules = await readJson(RULES_FILE, []);
-  const rule = { id: Date.now(), accountId: req.body.accountId, keyword: String(req.body.keyword||'').trim().toLowerCase(), reply: String(req.body.reply||'').trim(), active: true };
-  if (!rule.accountId || !rule.keyword || !rule.reply) return res.status(400).json({ ok:false, error:'account_keyword_reply_required' });
-  rules.push(rule); await writeJson(RULES_FILE, rules); res.json({ ok:true, rule });
-});
-app.delete('/api/rules/:id', async (req,res)=>{
-  const rules = (await readJson(RULES_FILE, [])).filter(r => String(r.id)!==String(req.params.id));
-  await writeJson(RULES_FILE, rules); res.json({ ok:true });
-});
-app.get('/api/logs', async (req,res)=>res.json({ logs: await readJson(LOGS_FILE, []) }));
-
-app.post('/api/ai/generate', async (req,res)=>{
-  const apiKey = process.env.OPENAI_API_KEY;
-  const topic = String(req.body.topic || 'reply').slice(0,200);
-  const tone = String(req.body.tone || 'friendly').slice(0,50);
-  if (!apiKey) {
-    return res.json({ ok:true, fallback:true, replies:[
-      'Спасибо за сообщение! Сейчас отправим подробности 🙌',
-      'Здравствуйте! Уже готовлю информацию для вас 👌',
-      'Спасибо за интерес! Напишем вам детали в сообщении 📩'
-    ]});
-  }
-  try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method:'POST', headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${apiKey}` },
-      body: JSON.stringify({ model:'gpt-4o-mini', messages:[{role:'system', content:'Generate short natural Instagram replies in Russian. Return JSON array only.'},{role:'user', content:`Topic: ${topic}. Tone: ${tone}. Generate 5 variants under 120 chars.`}], temperature:0.8 })
-    });
-    const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || '[]';
-    let replies; try { replies = JSON.parse(text); } catch { replies = text.split('\n').filter(Boolean); }
-    res.json({ ok:true, replies });
-  } catch(error){ res.status(500).json({ ok:false, error:error.message }); }
-});
-
-app.get('*', (req,res)=>res.sendFile(path.join(process.cwd(),'public/index.html')));
-
-await ensureStorage();
-app.listen(PORT, () => console.log(`IG Remote Browser Agent running on ${PORT}`));
+await initDb();
+const port = process.env.PORT || 10000;
+app.listen(port, ()=>console.log(`IG Instagram Login Agent running on ${port}`));
