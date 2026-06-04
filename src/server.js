@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import { initDb, q, dbInfo } from './db.js';
 import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret, dryRun } from './config.js';
 import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken } from './instagram.js';
-import { processWebhook } from './processor.js';
+import { processWebhook, log } from './processor.js';
 import { keywordMatch } from './util.js';
 import { applyBuiltInDefaults, loadSettingsIntoEnv, listSettings, saveSettings } from './settings.js';
 import { pollAllAccounts } from './poller.js';
@@ -195,8 +195,8 @@ app.get('/api/webhook/events/:id', asyncRoute(async (req,res)=>{
 }));
 
 app.post('/api/poll/run', asyncRoute(async (req,res)=>{
-  const out = await pollAllAccounts();
-  res.json({ ok:true, result:out });
+  const out = await pollAllAccounts({ verbose:true });
+  res.json({ ok:true, message:'Polling finished. Open Logs to see poll_summary / errors / matched replies.', result:out });
 }));
 
 app.post('/api/ai/generate', asyncRoute(async (req,res)=>{
@@ -210,6 +210,41 @@ app.post('/api/ai/generate', asyncRoute(async (req,res)=>{
   });
   const text = r.choices[0]?.message?.content || '';
   res.json({ ok:true, items: text.split('\n').map(s=>s.replace(/^[-\d.\s]+/,'').trim()).filter(Boolean) });
+}));
+
+
+app.post('/api/debug/test-rule', asyncRoute(async (req,res)=>{
+  const text = String(req.body?.text || req.query.text || '').trim();
+  const source = String(req.body?.source || req.query.source || 'test').trim();
+  if (!text) return res.status(400).json({ ok:false, error:'text is required' });
+  const { rows } = await q(`select r.*, a.username from automation_rules r left join instagram_accounts a on a.id=r.account_id where r.enabled=true order by r.id desc`);
+  const checked = [];
+  let first = null;
+  for (const r of rows) {
+    const matchedKeyword = keywordMatch(text, r.keywords || []);
+    const item = {
+      ruleId: r.id,
+      ruleName: r.name,
+      accountId: r.account_id,
+      account: r.username,
+      keywords: r.keywords || [],
+      matchedKeyword,
+      publicReply: matchedKeyword ? (r.public_replies || [])[0] || null : null,
+      dmReply: matchedKeyword ? (r.dm_replies || [])[0] || null : null
+    };
+    checked.push(item);
+    if (!first && matchedKeyword) first = item;
+  }
+  await log({
+    account_id: first?.accountId || null,
+    source: `debug_${source}`,
+    status: first ? 'matched' : 'ignored',
+    text,
+    response: first?.publicReply || first?.dmReply || null,
+    reason: first ? `test_rule_matched: rule=${first.ruleName}; keyword=${first.matchedKeyword}` : 'test_rule_keyword_not_matched',
+    raw: { text, source, checked }
+  });
+  res.json({ ok:true, text, matched: !!first, matchedRule:first, checked });
 }));
 
 app.get('/api/debug/match', asyncRoute(async (req,res)=>{
@@ -227,5 +262,15 @@ app.use((err,req,res,next)=>{
 applyBuiltInDefaults();
 await initDb();
 await loadSettingsIntoEnv();
+
+const autoPollEnabled = String(process.env.AUTO_POLL_ENABLED || 'true').toLowerCase() !== 'false';
+const autoPollSeconds = Math.max(30, Number(process.env.AUTO_POLL_SECONDS || 60));
+if (autoPollEnabled) {
+  console.log(`Auto polling enabled every ${autoPollSeconds}s`);
+  setInterval(() => {
+    pollAllAccounts({ verbose:false }).catch(e => console.error('auto poll failed', e));
+  }, autoPollSeconds * 1000);
+}
+
 const port = process.env.PORT || 10000;
 app.listen(port, ()=>console.log(`IG Agent Best Practices running on ${port}`));
