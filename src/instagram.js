@@ -78,8 +78,8 @@ export function publicDebug(req) {
     hasAppId: !!process.env.META_APP_ID,
     hasAppSecret: !!process.env.META_APP_SECRET,
     graphVersion: graphVersion(),
-    loginMode: 'instagram',
-    oauthAuthorizeUrl: 'https://www.instagram.com/oauth/authorize',
+    loginMode: 'instagram_third_party',
+    oauthAuthorizeUrl: 'https://www.instagram.com/accounts/login/ + /oauth/authorize/third_party/',
     graphBaseUrl: graphBase(),
     oauthScopes: ['instagram_business_basic','instagram_business_manage_comments','instagram_business_manage_messages']
   };

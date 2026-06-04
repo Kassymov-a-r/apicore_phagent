@@ -1,11 +1,16 @@
-# IG Agent — Instagram Login API version
+# IG Agent — Instagram Login third-party OAuth version
 
-Новый чистый проект под **Instagram API with Instagram Login**.
+Чистый проект под **Instagram Login API** без Facebook Page flow и без Playwright.
 
 ## Что внутри
 
-- OAuth через `https://www.instagram.com/oauth/authorize`
-- Без Facebook Login flow
+- OAuth через Instagram web login flow, похожий на ChatPlace:
+  - `https://www.instagram.com/accounts/login/`
+  - `next=/oauth/authorize/third_party/`
+- Scopes:
+  - `instagram_business_basic`
+  - `instagram_business_manage_comments`
+  - `instagram_business_manage_messages`
 - Без `pages_manage_metadata`
 - Без `pages_messaging`
 - Без `pages_*` зависимостей в OAuth
@@ -31,7 +36,7 @@ DRY_RUN=false
 OPENAI_API_KEY=...
 ```
 
-## Meta settings
+## Meta / Instagram API settings
 
 Instagram API → Instagram Login:
 
@@ -66,13 +71,24 @@ messaging_seen
 
 ## Debug
 
+After deploy, open:
+
 ```text
+/api/auth/debug
 /api/meta/debug
 /api/webhook/events
 /api/logs
 /api/debug/match?text=апикор
 ```
 
+`/api/auth/debug` should show:
+
+```text
+flow: instagram_accounts_login_third_party
+loginUrl: https://www.instagram.com/accounts/login/?...
+thirdPartyUrl: https://www.instagram.com/oauth/authorize/third_party/?...
+```
+
 ## Important
 
-Meta can still restrict real comment/message payloads until the app is approved or available for the tested Instagram account. This project removes the Facebook Page flow, but does not bypass Meta policies.
+This uses the Instagram-style OAuth screen, but it is still official Meta/Instagram OAuth. It does not bypass Meta policies. Real comments/messages can still be restricted until the app has the required access and is available for the tested Instagram account.

@@ -6,6 +6,7 @@ import { appBaseUrl, callbackUrl, instagramScopes, webhookUrl } from './config.j
 import { publicDebug, exchangeCodeForToken, exchangeLongLivedToken, getMe } from './instagram.js';
 import { processWebhook } from './processor.js';
 import OpenAI from 'openai';
+import crypto from 'crypto';
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -22,16 +23,50 @@ app.get('/healthz', asyncRoute(async (req,res)=>{
 }));
 
 app.get('/api/meta/debug', (req,res)=>res.json(publicDebug(req)));
+function buildInstagramLoginUrl(req, debug = false) {
+  const clientId = process.env.META_APP_ID || (debug ? 'MISSING_META_APP_ID' : '');
+  const statePayload = {
+    type: 'instagram',
+    flow: 'third_party',
+    ts: Date.now(),
+    nonce: crypto.randomBytes(8).toString('hex')
+  };
+  const state = Buffer.from(JSON.stringify(statePayload)).toString('base64');
+
+  const thirdParty = new URL('https://www.instagram.com/oauth/authorize/third_party/');
+  thirdParty.searchParams.set('redirect_uri', callbackUrl(req));
+  thirdParty.searchParams.set('response_type', 'code');
+  thirdParty.searchParams.set('scope', instagramScopes.join(','));
+  thirdParty.searchParams.set('state', state);
+  thirdParty.searchParams.set('enable_fb_login', '1');
+  thirdParty.searchParams.set('client_id', clientId);
+  thirdParty.searchParams.set('logger_id', crypto.randomUUID());
+
+  const loginUrl = new URL('https://www.instagram.com/accounts/login/');
+  loginUrl.searchParams.set('force_authentication', '1');
+  loginUrl.searchParams.set('platform_app_id', clientId);
+  loginUrl.searchParams.set('next', thirdParty.pathname + thirdParty.search);
+  loginUrl.searchParams.set('enable_fb_login', '1');
+  loginUrl.searchParams.set('flo', 'true');
+  return { loginUrl, thirdPartyUrl: thirdParty, callbackUrl: callbackUrl(req), statePayload };
+}
+
+app.get('/api/auth/debug', (req,res)=>{
+  const built = buildInstagramLoginUrl(req, true);
+  res.json({
+    ok:true,
+    loginUrl: built.loginUrl.toString(),
+    thirdPartyUrl: built.thirdPartyUrl.toString(),
+    callbackUrl: built.callbackUrl,
+    scopes: instagramScopes,
+    hasAppId: !!process.env.META_APP_ID,
+    flow: 'instagram_accounts_login_third_party'
+  });
+});
 
 app.get('/auth/instagram', (req,res)=>{
-  const url = new URL('https://www.instagram.com/oauth/authorize');
-  url.searchParams.set('client_id', process.env.META_APP_ID || '');
-  url.searchParams.set('redirect_uri', callbackUrl(req));
-  url.searchParams.set('response_type','code');
-  url.searchParams.set('scope', instagramScopes.join(','));
-  url.searchParams.set('enable_fb_login','0');
-  url.searchParams.set('force_authentication','1');
-  res.redirect(url.toString());
+  const built = buildInstagramLoginUrl(req);
+  res.redirect(built.loginUrl.toString());
 });
 
 app.get('/auth/instagram/callback', asyncRoute(async (req,res)=>{
