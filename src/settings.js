@@ -1,7 +1,24 @@
 import { q } from './db.js';
 
+export const BUILTIN_DEFAULTS = {
+  INSTAGRAM_CLIENT_ID: '864495216723927',
+  META_APP_ID: '864495216723927',
+  INSTAGRAM_CLIENT_SECRET: '0faebfc000d4ea91c6645b4997a9ccd8',
+  META_APP_SECRET: '0faebfc000d4ea91c6645b4997a9ccd8',
+  META_GRAPH_VERSION: 'v23.0',
+  META_WEBHOOK_VERIFY_TOKEN: 'apicore_igagent_verify_2026',
+  DRY_RUN: 'false'
+};
+
+export function applyBuiltInDefaults() {
+  for (const [key, value] of Object.entries(BUILTIN_DEFAULTS)) {
+    if (!process.env[key] && value) process.env[key] = value;
+  }
+}
+
 export const CONFIG_KEYS = [
   'APP_BASE_URL',
+  'DATABASE_URL',
   'INSTAGRAM_CLIENT_ID',
   'INSTAGRAM_CLIENT_SECRET',
   'META_APP_ID',
@@ -9,10 +26,12 @@ export const CONFIG_KEYS = [
   'META_WEBHOOK_VERIFY_TOKEN',
   'META_GRAPH_VERSION',
   'DRY_RUN',
-  'OPENAI_API_KEY'
+  'OPENAI_API_KEY',
+  'IG_USER_ID',
+  'IG_PAGE_ID'
 ];
 
-export const SECRET_KEYS = new Set(['INSTAGRAM_CLIENT_SECRET','META_APP_SECRET','OPENAI_API_KEY','META_WEBHOOK_VERIFY_TOKEN']);
+export const SECRET_KEYS = new Set(['INSTAGRAM_CLIENT_SECRET','META_APP_SECRET','OPENAI_API_KEY','META_WEBHOOK_VERIFY_TOKEN','DATABASE_URL']);
 
 export async function loadSettingsIntoEnv() {
   try {
@@ -32,11 +51,13 @@ export async function listSettings() {
     const envValue = process.env[key] || '';
     const dbValue = map[key]?.value || '';
     const value = dbValue || envValue || '';
+    const builtinValue = BUILTIN_DEFAULTS[key] || '';
+    const source = dbValue ? 'database' : envValue ? (builtinValue && envValue === builtinValue ? 'built-in' : 'environment') : 'missing';
     return {
       key,
       value: SECRET_KEYS.has(key) && value ? '********' : value,
       configured: !!value,
-      source: dbValue ? 'database' : envValue ? 'environment' : 'missing',
+      source,
       updated_at: map[key]?.updated_at || null,
       secret: SECRET_KEYS.has(key)
     };

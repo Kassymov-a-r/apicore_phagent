@@ -7,7 +7,7 @@ import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret,
 import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken } from './instagram.js';
 import { processWebhook } from './processor.js';
 import { keywordMatch } from './util.js';
-import { loadSettingsIntoEnv, listSettings, saveSettings } from './settings.js';
+import { applyBuiltInDefaults, loadSettingsIntoEnv, listSettings, saveSettings } from './settings.js';
 import { pollAllAccounts } from './poller.js';
 
 const app = express();
@@ -53,6 +53,11 @@ app.get('/api/auth/debug', (req,res)=>{
 
 app.get('/api/settings', asyncRoute(async (req,res)=>res.json({ settings: await listSettings() })));
 app.post('/api/settings', asyncRoute(async (req,res)=>res.json({ ok:true, saved: await saveSettings(req.body || {}), settings: await listSettings() })));
+app.post('/api/settings/reset-builtins', asyncRoute(async (req,res)=>{
+  applyBuiltInDefaults();
+  res.json({ ok:true, settings: await listSettings() });
+}));
+
 
 app.get('/auth/instagram', (req,res)=>{
   if (!instagramClientId()) return res.status(400).send('Missing Instagram Client ID. Add INSTAGRAM_CLIENT_ID or META_APP_ID in Settings/Render Environment.');
@@ -219,6 +224,7 @@ app.use((err,req,res,next)=>{
   res.status(500).json({ ok:false, error: err.message });
 });
 
+applyBuiltInDefaults();
 await initDb();
 await loadSettingsIntoEnv();
 const port = process.env.PORT || 10000;

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: ig-agent-instagram-login-best-practices
+    name: ig-agent-instagram-login-configured
     env: node
     plan: starter
     buildCommand: npm install
@@ -15,21 +15,25 @@ services:
       - key: APP_BASE_URL
         sync: false
       - key: INSTAGRAM_CLIENT_ID
-        sync: false
+        value: 864495216723927
       - key: INSTAGRAM_CLIENT_SECRET
-        sync: false
+        value: 0faebfc000d4ea91c6645b4997a9ccd8
       - key: META_APP_ID
-        sync: false
+        value: 864495216723927
       - key: META_APP_SECRET
-        sync: false
+        value: 0faebfc000d4ea91c6645b4997a9ccd8
       - key: META_WEBHOOK_VERIFY_TOKEN
-        sync: false
+        value: apicore_igagent_verify_2026
       - key: META_GRAPH_VERSION
         value: v23.0
       - key: DRY_RUN
         value: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: IG_USER_ID
+        value: 341274143193546
+      - key: IG_PAGE_ID
+        value: 341274143193546
 
 databases:
   - name: ig-agent-instagram-login-db
