@@ -29,7 +29,7 @@ export async function pollAccount(account, { verbose = false } = {}) {
 
   try {
     const mediaLimit = Math.max(10, Number(process.env.POLL_MEDIA_LIMIT || 50));
-    await debugLog({ account_id: account.id, source:'poll', status:'debug_poll_media_request', reason:`requesting media with comments; limit=${mediaLimit}`, raw:{ endpoint:'/me/media', fields:'id,caption,media_type,media_product_type,permalink,timestamp,comments_count,comments.limit(50){id,text,username,from,timestamp}', limit:mediaLimit } });
+    await debugLog({ account_id: account.id, source:'poll', status:'debug_poll_media_request', reason:`requesting media with comments; limit=${mediaLimit}`, raw:{ endpoint:'/me/media', fields:'id,caption,media_type,media_product_type,permalink,timestamp,comments_count + explicit /{media_id}/comments per media', limit:mediaLimit, strategy:'separate_media_then_comments_edge' } });
     const media = await listMediaWithComments(account.access_token, mediaLimit);
     const mediaCount = (media.data || []).length;
     summary.media_limit = mediaLimit;
@@ -41,10 +41,14 @@ export async function pollAccount(account, { verbose = false } = {}) {
       timestamp: item.timestamp,
       comments_count: item.comments_count ?? null,
       fetched_comments: item.comments?.data?.length || 0,
+      comments_fetch: item.comments_fetch || null,
+      sample_comments: (item.comments?.data || []).slice(0, 3).map(c => ({ id:c.id, username:c.username, text:c.text, timestamp:c.timestamp })),
       caption: item.caption ? String(item.caption).slice(0, 120) : ''
     }));
     summary.media_with_fetched_comments = summary.media_diagnostics.filter(x => x.fetched_comments > 0).length;
     summary.media_with_comments_count = summary.media_diagnostics.filter(x => Number(x.comments_count || 0) > 0).length;
+    summary.media_comment_fetch_attempts = summary.media_diagnostics.filter(x => x.comments_fetch?.attempted).length;
+    summary.media_comment_fetch_errors = summary.media_diagnostics.filter(x => x.comments_fetch && x.comments_fetch.ok === false).length;
     summary.media = mediaCount;
 
     await debugLog({
@@ -52,12 +56,12 @@ export async function pollAccount(account, { verbose = false } = {}) {
       source:'poll',
       status:'debug_poll_media_response',
       reason:`media=${mediaCount}; media_with_comments_count=${summary.media_with_comments_count}; media_with_fetched_comments=${summary.media_with_fetched_comments}`,
-      raw:{ diagnostics: summary.media_diagnostics, paging: media.paging || null, rawSummary: { mediaCount, mediaWithCommentsCount: summary.media_with_comments_count, mediaWithFetchedComments: summary.media_with_fetched_comments } }
+      raw:{ diagnostics: summary.media_diagnostics, paging: media.paging || null, media_raw: media.media_raw || null, rawSummary: { mediaCount, mediaWithCommentsCount: summary.media_with_comments_count, mediaWithFetchedComments: summary.media_with_fetched_comments, mediaCommentFetchAttempts: summary.media_comment_fetch_attempts, mediaCommentFetchErrors: summary.media_comment_fetch_errors } }
     });
 
     if (verbose) {
       for (const item of summary.media_diagnostics.slice(0, 50)) {
-        await debugLog({ account_id: account.id, source:'poll_media_item', status:'debug_media_item', media_id:item.id, reason:`comments_count=${item.comments_count}; fetched_comments=${item.fetched_comments}`, raw:item });
+        await debugLog({ account_id: account.id, source:'poll_media_item', status:'debug_media_item', media_id:item.id, reason:`comments_count=${item.comments_count}; fetched_comments=${item.fetched_comments}; fetch_ok=${item.comments_fetch?.ok}; fetch_error=${item.comments_fetch?.error || ''}`, raw:item });
       }
     }
 
@@ -108,8 +112,9 @@ export async function pollAccount(account, { verbose = false } = {}) {
   }
 
   if (verbose || summary.comments === 0 && summary.messages === 0) {
-    let reason = `poll_summary: media=${summary.media ?? 'n/a'} media_with_comments_count=${summary.media_with_comments_count ?? 'n/a'} media_with_fetched_comments=${summary.media_with_fetched_comments ?? 'n/a'} comments=${summary.comments} conversations=${summary.conversations ?? 'n/a'} messages=${summary.messages} errors=${summary.errors.length}`;
-    if (!summary.comments && summary.media_with_comments_count > 0) reason += '; comments_count_exists_but_comments_edge_empty_or_limited';
+    let reason = `poll_summary: media=${summary.media ?? 'n/a'} media_with_comments_count=${summary.media_with_comments_count ?? 'n/a'} media_with_fetched_comments=${summary.media_with_fetched_comments ?? 'n/a'} comment_fetch_attempts=${summary.media_comment_fetch_attempts ?? 'n/a'} comment_fetch_errors=${summary.media_comment_fetch_errors ?? 'n/a'} comments=${summary.comments} conversations=${summary.conversations ?? 'n/a'} messages=${summary.messages} errors=${summary.errors.length}`;
+    if (!summary.comments && summary.media_with_comments_count > 0 && summary.media_comment_fetch_errors > 0) reason += '; comments_edge_errors_seen_expand_log';
+    if (!summary.comments && summary.media_with_comments_count > 0 && !summary.media_comment_fetch_errors) reason += '; comments_count_exists_but_comments_edge_empty_or_limited';
     if (!summary.comments && summary.media_with_comments_count === 0) reason += '; latest_media_have_no_comments';
     if (!summary.messages && summary.conversations === 0) reason += '; no_conversations_returned_by_api';
     await log({ account_id: account.id, source: 'poll', status: summary.errors.length ? 'poll_finished_with_errors' : 'poll_finished', reason, raw: summary });

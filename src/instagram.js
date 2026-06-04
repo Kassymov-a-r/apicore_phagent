@@ -156,12 +156,55 @@ export async function sendDm(recipientId, text, token) {
   });
 }
 
-export async function listMediaWithComments(token, limit = 50) {
+export async function listMedia(token, limit = 50) {
   return graphGet('/me/media', token, {
-    // comments_count lets us distinguish "there are really no comments" from "comments edge is not returned".
-    fields: 'id,caption,media_type,media_product_type,permalink,timestamp,comments_count,comments.limit(50){id,text,username,from,timestamp}',
+    // Keep media listing separate from comments fetching. In practice Meta can return
+    // comments_count while omitting nested comments expansion, so we call /{media_id}/comments explicitly.
+    fields: 'id,caption,media_type,media_product_type,permalink,timestamp,comments_count',
     limit
   });
+}
+
+export async function listCommentsForMedia(mediaId, token, limit = 50) {
+  return graphGet(`/${mediaId}/comments`, token, {
+    fields: 'id,text,username,from,timestamp,parent_id,replies.limit(10){id,text,username,timestamp}',
+    limit
+  });
+}
+
+export async function listMediaWithComments(token, limit = 50, commentsLimit = 50) {
+  const media = await listMedia(token, limit);
+  const out = [];
+  for (const item of media.data || []) {
+    const copy = { ...item };
+    const commentsCount = Number(item.comments_count || 0);
+    copy.comments_fetch = {
+      attempted: commentsCount > 0,
+      endpoint: `/${item.id}/comments`,
+      limit: commentsLimit,
+      ok: null,
+      error: null,
+      raw: null
+    };
+    if (commentsCount > 0) {
+      try {
+        const comments = await listCommentsForMedia(item.id, token, commentsLimit);
+        copy.comments = { data: comments.data || [], paging: comments.paging || null };
+        copy.comments_fetch.ok = true;
+        copy.comments_fetch.raw = comments;
+      } catch (e) {
+        copy.comments = { data: [] };
+        copy.comments_fetch.ok = false;
+        copy.comments_fetch.error = e?.message || String(e);
+      }
+    } else {
+      copy.comments = { data: [] };
+      copy.comments_fetch.ok = true;
+      copy.comments_fetch.raw = { data: [] };
+    }
+    out.push(copy);
+  }
+  return { ...media, data: out, media_raw: media };
 }
 
 export async function listMediaDiagnostics(token, limit = 50) {
@@ -177,7 +220,8 @@ export async function listMediaDiagnostics(token, limit = 50) {
       timestamp: item.timestamp,
       comments_count: item.comments_count ?? null,
       fetched_comments: item.comments?.data?.length || 0,
-      sample_comments: (item.comments?.data || []).slice(0, 3).map(c => ({ id: c.id, username: c.username, text: c.text }))
+      comments_fetch: item.comments_fetch || null,
+      sample_comments: (item.comments?.data || []).slice(0, 3).map(c => ({ id: c.id, username: c.username, text: c.text, timestamp: c.timestamp }))
     }))
   };
 }

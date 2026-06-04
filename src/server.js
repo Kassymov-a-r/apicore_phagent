@@ -2,8 +2,10 @@ import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
 import OpenAI from 'openai';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { initDb, q, dbInfo } from './db.js';
-import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret, dryRun } from './config.js';
+import { callbackUrl, webhookUrl, instagramScopes, instagramClientId, appSecret, dryRun, graphVersion } from './config.js';
 import { publicDebug, buildInstagramLoginUrl, buildFacebookFallbackLoginUrl, exchangeInstagramCodeForToken, exchangeFacebookCodeForToken, exchangeLongLivedInstagramToken, getMe, refreshLongLivedInstagramToken, listMediaDiagnostics, listConversations } from './instagram.js';
 import { processWebhook, log } from './processor.js';
 import { keywordMatch } from './util.js';
@@ -19,6 +21,80 @@ app.use(express.static('public'));
 function asyncRoute(fn){ return (req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next); }
 function ownerMode(){ return { id:'owner', role:'owner', noAuth:true }; }
 function decodeState(s='') { try { return JSON.parse(Buffer.from(String(s), 'base64url').toString('utf8')); } catch { return {}; } }
+
+
+const DATA_DIR = process.env.DATA_DIR || process.env.RENDER_DISK_PATH || path.join(process.cwd(), 'data');
+const ASSISTANT_FILES_DIR = path.join(DATA_DIR, 'assistant-files');
+
+async function ensureAssistantFilesDir() {
+  await fs.mkdir(ASSISTANT_FILES_DIR, { recursive: true });
+}
+function safeFileName(name) {
+  const base = path.basename(String(name || 'file.txt'));
+  return base.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]/g, '_').slice(0, 160) || 'file.txt';
+}
+function stamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+async function saveAssistantFile(filename, content) {
+  await ensureAssistantFilesDir();
+  const clean = safeFileName(filename);
+  const full = path.join(ASSISTANT_FILES_DIR, clean);
+  await fs.writeFile(full, content, 'utf8');
+  return { name: clean, url: `/api/assistant/files/${encodeURIComponent(clean)}`, size: Buffer.byteLength(content, 'utf8') };
+}
+async function listAssistantFiles() {
+  await ensureAssistantFilesDir();
+  const names = await fs.readdir(ASSISTANT_FILES_DIR).catch(() => []);
+  const out = [];
+  for (const name of names) {
+    try {
+      const st = await fs.stat(path.join(ASSISTANT_FILES_DIR, name));
+      if (st.isFile()) out.push({ name, url: `/api/assistant/files/${encodeURIComponent(name)}`, size: st.size, updatedAt: st.mtime.toISOString() });
+    } catch {}
+  }
+  return out.sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+async function getProjectSnapshot() {
+  const [accounts, rules, logs, events] = await Promise.all([
+    q('select id,ig_user_id,username,account_type,active,connection_method,token_expires_at,created_at,updated_at from instagram_accounts order by id desc').catch(e=>({ rows:[], error:e.message })),
+    q(`select r.*, a.username from automation_rules r left join instagram_accounts a on a.id=r.account_id order by r.id desc`).catch(e=>({ rows:[], error:e.message })),
+    q('select * from activity_logs order by id desc limit 20').catch(e=>({ rows:[], error:e.message })),
+    q('select id,object_type,entry_count,change_fields,messaging_count,processed_count,status,error,created_at from webhook_events order by id desc limit 20').catch(e=>({ rows:[], error:e.message }))
+  ]);
+  return {
+    app: 'IG Agent Instagram Login',
+    databaseInfo: dbInfo(),
+    config: {
+      appBaseUrl: process.env.APP_BASE_URL || null,
+      hasAppId: !!instagramClientId(),
+      hasAppSecret: !!appSecret(),
+      graphVersion: graphVersion(),
+      dryRun: dryRun(),
+      oauthScopes: instagramScopes
+    },
+    accounts: (accounts.rows || []).map(a => ({ ...a, access_token: undefined, token_present: undefined })),
+    rules: (rules.rows || []).map(r => ({ id:r.id, account_id:r.account_id, account:r.username, name:r.name, enabled:r.enabled, keywords:r.keywords, public_replies_count:(r.public_replies||[]).length, dm_replies_count:(r.dm_replies||[]).length })),
+    latestLogs: logs.rows || [],
+    latestEvents: events.rows || []
+  };
+}
+function projectKnowledge() {
+  return `
+Project context:
+- This project is IG Agent: Instagram automation panel for one owner and a few Instagram Professional accounts.
+- Current architecture: Node/Express, Instagram Login API, Manual Token Connect, JSON fallback database if DATABASE_URL is absent, optional PostgreSQL, detailed logs, polling fallback, webhooks.
+- Required Instagram Login scopes: instagram_business_basic, instagram_business_manage_comments, instagram_business_manage_messages.
+- Meta Webhook fields to watch: comments, live_comments, mentions, messages, message_edit, message_reactions, messaging_postbacks, messaging_seen.
+- Current operational problem history: Facebook Page flow caused pages_manage_metadata issues, so the project moved to Instagram Login API and Manual Token mode. Real webhook availability may depend on Meta app mode/review. Polling is used as fallback.
+- The interface has Accounts, Automations, Logs, Secrets, Debug. Logs can be expanded to see full JSON payloads and errors.
+- The assistant cannot redeploy the server by itself. It can generate downloadable files: instructions, JSON diagnostics, patch drafts, README text, code snippets, and change plans.
+- Never recommend password scraping, private API abuse, spam, mass unsolicited messages, or aggressive automation. Prefer official API and safe rate limits.
+`;
+}
+function localAssistantAnswer(question, snapshot) {
+  return `Я работаю в локальном режиме, потому что OPENAI_API_KEY не настроен.\n\nЧто вижу по проекту:\n- Аккаунтов: ${snapshot.accounts?.length ?? 0}\n- Правил: ${snapshot.rules?.length ?? 0}\n- Последних логов: ${snapshot.latestLogs?.length ?? 0}\n- База: ${snapshot.databaseInfo?.mode || 'unknown'}\n\nПо твоему вопросу: ${question}\n\nБыстрый порядок диагностики:\n1. Открой «Секреты» и проверь INSTAGRAM_CLIENT_ID, INSTAGRAM_CLIENT_SECRET, META_WEBHOOK_VERIFY_TOKEN, OPENAI_API_KEY.\n2. Открой «Аккаунты» и проверь, что аккаунт active и токен подключён.\n3. В «Автоматизации» нажми «Тест правила» с нужным словом.\n4. В «Логи» нажми «Проверить Instagram сейчас» и раскрой последние события.\n5. Пришли раскрытый JSON события, если ответ не сработал.\n\nЯ также создал diagnostic JSON файл, который можно скачать из списка файлов помощника.`;
+}
 
 app.get('/healthz', asyncRoute(async (req,res)=>{
   let db='missing';
@@ -263,6 +339,55 @@ app.get('/api/poll/conversations-debug', asyncRoute(async (req,res)=>{
   res.json({ ok:true, accounts: result });
 }));
 
+
+
+app.get('/api/assistant/files', asyncRoute(async (req,res)=>{
+  res.json({ ok:true, files: await listAssistantFiles() });
+}));
+app.get('/api/assistant/files/:name', asyncRoute(async (req,res)=>{
+  const name = safeFileName(req.params.name);
+  const full = path.join(ASSISTANT_FILES_DIR, name);
+  try {
+    await fs.access(full);
+    res.download(full, name);
+  } catch {
+    res.status(404).json({ ok:false, error:'file_not_found' });
+  }
+}));
+app.get('/api/assistant/knowledge', asyncRoute(async (req,res)=>{
+  res.json({ ok:true, knowledge: projectKnowledge(), snapshot: await getProjectSnapshot(), files: await listAssistantFiles() });
+}));
+app.post('/api/assistant/ask', asyncRoute(async (req,res)=>{
+  const question = String(req.body?.question || '').trim();
+  const mode = String(req.body?.mode || 'answer');
+  if (!question) return res.status(400).json({ ok:false, error:'question is required' });
+  const snapshot = await getProjectSnapshot();
+  let answer = '';
+  const system = `${projectKnowledge()}\nAnswer in Russian. Be direct and practical. When code changes are needed, provide a patch plan with file names. If asked to create files, generate downloadable file content. Do not claim you applied changes to the deployed server.`;
+  if (process.env.OPENAI_API_KEY) {
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const r = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages: [
+        { role:'system', content: system },
+        { role:'user', content: `Question/request:\n${question}\n\nCurrent project snapshot JSON:\n${JSON.stringify(snapshot, null, 2).slice(0, 24000)}` }
+      ],
+      temperature: 0.3
+    });
+    answer = r.choices[0]?.message?.content || '';
+  } else {
+    answer = localAssistantAnswer(question, snapshot);
+  }
+  const files = [];
+  files.push(await saveAssistantFile(`assistant-answer-${stamp()}.md`, `# AI Assistant Answer\n\n${answer}\n\n---\n\n## Question\n\n${question}\n`));
+  files.push(await saveAssistantFile(`diagnostic-snapshot-${stamp()}.json`, JSON.stringify(snapshot, null, 2)));
+  if (/patch|патч|код|файл|zip|архив|исправ/i.test(question) || mode === 'patch') {
+    const patchDraft = `# Patch / Change Plan\n\nUser request:\n${question}\n\nAssistant answer:\n${answer}\n\n## Important\nThis file is a draft. Apply changes in the source project, commit, then redeploy.\n`;
+    files.push(await saveAssistantFile(`patch-plan-${stamp()}.md`, patchDraft));
+  }
+  await log({ source:'assistant', status:'assistant_answer', text:question, response:answer, reason:`files=${files.length}`, raw:{ mode, files } }).catch(()=>{});
+  res.json({ ok:true, answer, files, snapshotSummary:{ accounts:snapshot.accounts?.length||0, rules:snapshot.rules?.length||0, logs:snapshot.latestLogs?.length||0, database:snapshot.databaseInfo } });
+}));
 
 app.post('/api/ai/generate', asyncRoute(async (req,res)=>{
   if (!process.env.OPENAI_API_KEY) return res.status(400).json({ ok:false, error:'OPENAI_API_KEY is not configured' });
