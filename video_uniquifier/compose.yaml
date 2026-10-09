@@ -1,0 +1,11 @@
+services:
+  video-bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - bot-work:/app/work
+    stop_grace_period: 330s
+    # No incoming ports: Telegram updates arrive through long polling.
+volumes:
+  bot-work:

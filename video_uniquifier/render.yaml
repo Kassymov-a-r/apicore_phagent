@@ -1,0 +1,48 @@
+# Free Web Service: no paid disks, databases or workers.
+services:
+  - type: web
+    name: telegram-video-uniquifier
+    runtime: docker
+    plan: free
+    region: oregon
+    repo: https://github.com/Kassymov-a-r/apicore_phagent
+    branch: feature/telegram-video-uniquifier
+    dockerfilePath: ./video_uniquifier/Dockerfile.render
+    dockerContext: ./video_uniquifier
+    healthCheckPath: /healthz
+    numInstances: 1
+    autoDeployTrigger: "off"
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ALLOWED_USER_IDS
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: WORK_DIR
+        value: /tmp/video-work
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONUTF8
+        value: "1"
+      - key: BOT_API_LOCAL
+        value: "false"
+      - key: MAX_INPUT_MB
+        value: "20"
+      - key: MAX_OUTPUT_MB
+        value: "50"
+      - key: MAX_DURATION_SECONDS
+        value: "90"
+      - key: MAX_PIXELS
+        value: "2073600"
+      - key: MAX_JOBS
+        value: "1"
+      - key: VIDEO_CRF
+        value: "16"
+      - key: VIDEO_PRESET
+        value: veryfast
+      - key: FFMPEG_THREADS
+        value: "1"
+      - key: PROCESS_TIMEOUT_SECONDS
+        value: "600"

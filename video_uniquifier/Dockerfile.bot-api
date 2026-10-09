@@ -1,0 +1,21 @@
+FROM debian:bookworm-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates git cmake make g++ gperf libssl-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+ARG BOT_API_REF=master
+RUN git clone --recursive --depth 1 --shallow-submodules --branch "$BOT_API_REF" \
+    https://github.com/tdlib/telegram-bot-api.git /src
+RUN cmake -S /src -B /src/build -DCMAKE_BUILD_TYPE=Release \
+    && cmake --build /src/build --target install -j2
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 zlib1g \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 videobot \
+    && mkdir -p /var/lib/telegram-bot-api \
+    && chown videobot:videobot /var/lib/telegram-bot-api
+COPY --from=build /usr/local/bin/telegram-bot-api /usr/local/bin/telegram-bot-api
+USER videobot
+WORKDIR /var/lib/telegram-bot-api
+# TELEGRAM_API_ID and TELEGRAM_API_HASH are read directly by the official server.
+CMD ["telegram-bot-api", "--local", "--http-port=8081", "--dir=/var/lib/telegram-bot-api"]

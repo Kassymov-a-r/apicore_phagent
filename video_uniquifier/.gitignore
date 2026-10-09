@@ -1,0 +1,10 @@
+.env
+work/
+__pycache__/
+*.pyc
+*.mp4
+*.mkv
+*.bundle
+test-results.txt
+logs/
+tools/

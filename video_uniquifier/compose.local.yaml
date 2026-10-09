@@ -1,0 +1,21 @@
+services:
+  bot-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot-api
+      args:
+        BOT_API_REF: ${BOT_API_REF:-master}
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?Set TELEGRAM_API_ID in .env}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?Set TELEGRAM_API_HASH in .env}
+    volumes:
+      - api-data:/var/lib/telegram-bot-api
+    # Keep the API inside the Docker network; do not expose the port publicly.
+  video-bot:
+    depends_on:
+      - bot-api
+    volumes:
+      - api-data:/var/lib/telegram-bot-api:ro
+volumes:
+  api-data:
