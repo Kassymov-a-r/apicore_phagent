@@ -94,12 +94,13 @@ class TelegramAPI:
                 raise ValueError('Файл превышает предел размера.')
             dst.write(chunk)
 
-    def send_document(self, chat_id: int, path: Path, caption: str, reply_to: int,
+    def send_document(self, chat_id: int, path: Path, caption: str, reply_to: int | None,
                       cancel: threading.Event):
         boundary = 'VideoBot' + uuid.uuid4().hex
-        fields = {'chat_id': str(chat_id), 'caption': caption,
-                  'reply_parameters': json.dumps({'message_id': reply_to,
-                                                  'allow_sending_without_reply': True})}
+        fields = {'chat_id': str(chat_id), 'caption': caption}
+        if reply_to is not None:
+            fields['reply_parameters'] = json.dumps({'message_id': reply_to,
+                                                     'allow_sending_without_reply': True})
         head = b''
         for key, value in fields.items():
             head += (f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n'

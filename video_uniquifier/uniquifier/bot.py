@@ -28,6 +28,7 @@ class Settings:
     local_api: bool = False
     work_dir: Path = Path('work')
     max_input: int = 20 * 1024 * 1024
+    max_web_input: int = 200 * 1024 * 1024
     max_output: int = 50 * 1024 * 1024
     max_duration: int = 600
     max_pixels: int = 3840 * 2160
@@ -51,6 +52,7 @@ class Settings:
                   local_root=Path(os.environ['BOT_API_FILE_ROOT']) if os.getenv('BOT_API_FILE_ROOT') else None,
                   work_dir=Path(os.getenv('WORK_DIR', 'work')),
                   max_input=int(os.getenv('MAX_INPUT_MB', '500' if local else '20')) * 1024 * 1024,
+                  max_web_input=int(os.getenv('MAX_WEB_INPUT_MB', '200')) * 1024 * 1024,
                   max_output=int(os.getenv('MAX_OUTPUT_MB', '1900' if local else '50')) * 1024 * 1024,
                   max_duration=int(os.getenv('MAX_DURATION_SECONDS', '600')),
                   max_pixels=int(os.getenv('MAX_PIXELS', str(3840 * 2160))),
@@ -63,6 +65,8 @@ class Settings:
             raise ValueError('Недопустимый VIDEO_PRESET.')
         if min(cfg.max_input, cfg.max_output, cfg.max_duration, cfg.max_pixels, cfg.timeout) <= 0:
             raise ValueError('Лимиты должны быть положительными.')
+        if not 1 <= cfg.max_web_input <= 500 * 1024**2:
+            raise ValueError('MAX_WEB_INPUT_MB должен быть от 1 до 500.')
         if not local and (cfg.max_input > 20 * 1024**2 or cfg.max_output > 50 * 1024**2):
             raise ValueError('Для больших файлов нужен BOT_API_LOCAL=true и локальный Bot API.')
         if local and ('api.telegram.org' in cfg.api_base or not cfg.local_root):
@@ -83,6 +87,39 @@ class VideoBot:
         self.jobs: dict[tuple[int, int], threading.Event] = {}
         self.modes: dict[int, str] = {}
         self.stop = threading.Event()
+        self.upload_url: str | None = None
+
+    def offer_upload(self, message):
+        chat = message['chat']['id']
+        if chat != message.get('from', {}).get('id'):
+            self.say(chat, 'Для большого видео откройте личный чат со мной и отправьте /upload.')
+            return
+        payload = {'chat_id': chat,
+                   'text': f'Загрузите исходник до {self.cfg.max_web_input // 1024**2} MiB '
+                           'без сжатия через кнопку ниже. Пять результатов придут в этот чат. '
+                           f'До {self.cfg.max_duration} секунд; каждый результат — '
+                           f'до {self.cfg.max_output // 1024**2} MiB.',
+                   'reply_markup': {'inline_keyboard': [[{'text': 'Загрузить видео без сжатия',
+                                                          'web_app': {'url': self.upload_url}}]]}}
+        retry_rate_limit(lambda: self.api.call('sendMessage', payload), self.stop)
+
+    def reserve_job(self, chat, user):
+        key = (chat, user)
+        with self.lock:
+            if self.stop.is_set():
+                raise MediaError('Сервис перезапускается. Попробуйте через минуту.')
+            if key in self.jobs:
+                raise MediaError('Ваше видео уже обрабатывается. Дождитесь результата или /cancel.')
+            if not self.slots.acquire(blocking=False):
+                raise MediaError('Бот занят. Пришлите видео после завершения текущей обработки.')
+            event = threading.Event()
+            self.jobs[key] = event
+            return key, event, self.modes.get(user, 'micro')
+
+    def release_job(self, key):
+        with self.lock:
+            self.jobs.pop(key, None)
+        self.slots.release()
 
     def say(self, chat: int, text: str, cancel: threading.Event | None = None):
         return retry_rate_limit(lambda: self.api.call('sendMessage', {'chat_id': chat, 'text': text}),
@@ -112,6 +149,10 @@ class VideoBot:
                      f'Длительность: до {self.cfg.max_duration} секунд; '
                      f'кадр: до {self.cfg.max_pixels:,} пикселей.\n'
                      'Изменение хеша не гарантирует, что соцсеть сочтёт ролик новым.')
+            if self.upload_url:
+                self.offer_upload(message)
+        elif text == '/upload' and self.upload_url:
+            self.offer_upload(message)
         elif text in ('/micro', '/lossless'):
             with self.lock:
                 self.modes[user] = text[1:]
@@ -132,25 +173,22 @@ class VideoBot:
                 self.say(chat, 'Пришлите видео как файл или нажмите /help.')
                 return
             if media.get('file_size', 0) > self.cfg.max_input:
-                self.say(chat, f'Размер превышает {self.cfg.max_input // 1024**2} MiB. '
-                         'Для больших исходников настройте локальный Bot API; не сжимайте исходник.')
-                return
-            with self.lock:
-                if key in self.jobs:
-                    problem = 'Ваше видео уже обрабатывается. Дождитесь результата или /cancel.'
-                elif not self.slots.acquire(blocking=False):
-                    problem = 'Бот занят. Пришлите видео после завершения текущей обработки.'
+                if self.upload_url:
+                    self.say(chat, 'Telegram не даёт боту скачать такой большой файл из чата. '
+                             'Загрузите тот же исходник через кнопку — без сжатия.')
+                    self.offer_upload(message)
                 else:
-                    problem = ''
-                    event = threading.Event()
-                    self.jobs[key] = event
-                    mode = self.modes.get(user, 'micro')
-            if problem:
-                self.say(chat, problem)
+                    self.say(chat, f'Размер превышает {self.cfg.max_input // 1024**2} MiB. '
+                             'Для больших исходников настройте локальный Bot API; не сжимайте исходник.')
+                return
+            try:
+                key, event, mode = self.reserve_job(chat, user)
+            except MediaError as error:
+                self.say(chat, str(error))
                 return
             self.pool.submit(self.process, message, media, key, event, mode)
 
-    def process(self, message, media, key, cancel, mode):
+    def process(self, message, media, key, cancel, mode, uploaded_source=None):
         chat, user = key
         sent = 0
         try:
@@ -159,11 +197,14 @@ class VideoBot:
                 folder = Path(temp)
                 (folder / '.video_bot_job').write_text('video-uniquifier-v1')
                 # Reserve enough room for the source and two outputs; results are removed after delivery.
-                needed = self.cfg.max_input + 2 * self.cfg.max_output + 100 * 1024**2
+                needed = (0 if uploaded_source else self.cfg.max_input) + 2 * self.cfg.max_output + 100 * 1024**2
                 if shutil.disk_usage(folder).free < needed:
                     raise MediaError('Недостаточно свободного места на сервере.')
                 source = folder / 'source.bin'
-                self.api.download(media['file_id'], source, self.cfg.max_input, cancel)
+                if uploaded_source:
+                    uploaded_source.replace(source)
+                else:
+                    self.api.download(media['file_id'], source, self.cfg.max_input, cancel)
                 source_hash = sha256(source)
                 results = []
                 for i in range(5):
@@ -199,9 +240,9 @@ class VideoBot:
             self.notify_failure(chat, f'Ошибка обработки или отправки. Отправлено {sent}/5 видео. '
                                 'Проверьте подключение и настройки сервера, затем пришлите файл снова.')
         finally:
-            with self.lock:
-                self.jobs.pop(key, None)
-            self.slots.release()
+            if uploaded_source:
+                shutil.rmtree(uploaded_source.parent, ignore_errors=True)
+            self.release_job(key)
 
     def notify_failure(self, chat, text):
         try:

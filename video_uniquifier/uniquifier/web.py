@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 from .bot import Settings, VideoBot, load_env
+from .uploads import UPLOAD_PAGE, Uploads
 
 LOG = logging.getLogger('video_bot')
 WEBHOOK_PATH = '/telegram/webhook'
@@ -98,6 +99,7 @@ class WebhookInbox:
 
 
 def make_server(inbox, host='0.0.0.0', port=10000):
+    uploads = Uploads(inbox.bot) if isinstance(inbox.bot, VideoBot) else None
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
@@ -114,11 +116,54 @@ def make_server(inbox, host='0.0.0.0', port=10000):
                 self.send_header('Retry-After', '5')
             self.end_headers()
 
+        def respond_json(self, code, payload):
+            raw = json.dumps(payload, ensure_ascii=False).encode()
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', str(len(raw)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def upload_user(self):
+            if not uploads or not inbox.ready.is_set() or inbox.bot.stop.is_set():
+                self.respond_json(503, {'error': 'Сервис запускается. Попробуйте через минуту.'})
+                return None
+            try:
+                return uploads.authorize(self)
+            except (ValueError, TypeError, UnicodeError):
+                self.respond_json(403, {'error': 'Откройте загрузку кнопкой /upload '
+                                               'в личном чате с ботом. Доступ разрешён владельцу.'})
+                return None
+
         def do_GET(self):
+            path = urlsplit(self.path).path
+            if path == '/upload':
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Length', str(len(UPLOAD_PAGE)))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Referrer-Policy', 'no-referrer')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.send_header('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline' https://telegram.org; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org")
+                self.end_headers()
+                self.wfile.write(UPLOAD_PAGE)
+                return
+            if path == '/upload/status':
+                user = self.upload_user()
+                if user is not None:
+                    self.respond_json(200, uploads.status(user))
+                return
             self.respond((200 if inbox.ready.is_set() and not inbox.bot.stop.is_set() else 503)
                          if self.path == '/healthz' else 404)
 
         def do_POST(self):
+            if self.path == '/upload/video':
+                user = self.upload_user()
+                if user is not None:
+                    uploads.receive(self, user)
+                return
             if self.path != WEBHOOK_PATH:
                 self.respond(404)
                 return
@@ -157,6 +202,7 @@ def main():
     except ValueError as error:
         raise SystemExit(str(error)) from None
     bot = VideoBot(settings)
+    bot.upload_url = url.removesuffix(WEBHOOK_PATH) + '/upload'
     inbox = WebhookInbox(bot, secret)
     server = make_server(inbox, port=port)
     http_thread = threading.Thread(target=server.serve_forever, daemon=True)

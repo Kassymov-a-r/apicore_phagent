@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Загрузка видео</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; background: var(--tg-theme-bg-color, #f6f4fb); color: var(--tg-theme-text-color, #242033); }
+    * { box-sizing: border-box; } body { margin: 0; padding: 24px 20px; }
+    main { max-width: 460px; margin: 0 auto; } h1 { font-size: 28px; line-height: 1.2; margin: 16px 0 12px; }
+    p { line-height: 1.5; } .muted { color: var(--tg-theme-hint-color, #766e89); font-size: 14px; }
+    .card { background: var(--tg-theme-secondary-bg-color, #fff); padding: 20px; border-radius: 18px; margin: 24px 0; }
+    label { display: block; font-weight: 650; margin-bottom: 12px; } input { max-width: 100%; font: inherit; }
+    button { width: 100%; min-height: 50px; padding: 14px; border: 0; border-radius: 14px; background: var(--tg-theme-button-color, #7660d8); color: var(--tg-theme-button-text-color, #fff); font: inherit; font-weight: 650; }
+    button:disabled { opacity: .45; } progress { width: 100%; margin-top: 18px; accent-color: #7660d8; }
+    #status { min-height: 48px; } #close { margin-top: 12px; } [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="muted">Пять вариантов для публикации</p>
+  <h1>Загрузи исходное видео</h1>
+  <p>Выбери файл с телефона. Загрузка сохраняет исходник без сжатия. Пять готовых видео придут в личный чат с ботом.</p>
+  <p id="limits" class="muted">Проверяем доступ…</p>
+  <div class="card">
+    <label for="video">Видеофайл</label>
+    <input id="video" type="file" accept="video/*,.mp4,.mov,.mkv,.webm,.avi" disabled>
+    <p id="fileInfo" class="muted">Выбери оригинальный файл, а не уменьшенную копию.</p>
+    <button id="send" disabled>Создать 5 вариантов</button>
+    <progress id="progress" value="0" max="100" hidden aria-label="Прогресс загрузки"></progress>
+    <p id="status" role="status" aria-live="polite"></p>
+    <button id="close" hidden>Вернуться в чат</button>
+  </div>
+  <p class="muted">Оставь окно открытым до завершения загрузки. Затем обработка продолжится, а результаты появятся в чате. Формат и длительность проверяются после загрузки.</p>
+</main>
+<script>
+  const app = window.Telegram?.WebApp;
+  app?.ready(); app?.expand();
+  const fileInput = document.getElementById('video');
+  const send = document.getElementById('send');
+  const status = document.getElementById('status');
+  const progress = document.getElementById('progress');
+  let limits = null, uploading = false;
+  const initData = app?.initData || '';
+  const mib = bytes => (bytes / 1048576).toFixed(1);
+  const headers = {'X-Telegram-Init-Data': initData};
+  function refreshButton() {
+    const file = fileInput.files[0];
+    send.disabled = uploading || !limits || !file || file.size <= 0 || file.size > limits.max_bytes;
+    document.getElementById('fileInfo').textContent = file ? `${file.name} · ${mib(file.size)} МБ` : 'Выбери оригинальный файл, а не уменьшенную копию.';
+    if (file && limits && file.size > limits.max_bytes) status.textContent = `Файл слишком большой. Предел — ${mib(limits.max_bytes)} МБ.`;
+  }
+  fileInput.addEventListener('change', () => { status.textContent = ''; refreshButton(); });
+  async function prepare() {
+    if (!initData) { status.textContent = 'Открой загрузку кнопкой в личном чате с ботом: команда /upload.'; document.getElementById('limits').textContent = ''; return; }
+    try {
+      const response = await fetch('/upload/status', {headers, cache: 'no-store'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Сервис запускается. Попробуй через минуту.');
+      if (data.active) throw new Error('Видео уже загружается или обрабатывается. Проверь /status в чате.');
+      limits = data;
+      document.getElementById('limits').textContent = `До ${mib(data.max_bytes)} МБ · до ${data.max_duration} секунд · до 1080p. Результаты: до ${mib(data.max_output_bytes)} МБ каждый. Режим: ${data.mode === 'lossless' ? 'без перекодирования' : 'мягкие изменения'}.`;
+      fileInput.disabled = false; refreshButton();
+    } catch (error) { status.textContent = error.message; document.getElementById('limits').textContent = ''; }
+  }
+  send.addEventListener('click', () => {
+    const file = fileInput.files[0];
+    if (send.disabled || !file) return;
+    uploading = true; fileInput.disabled = true; refreshButton();
+    progress.hidden = false; progress.value = 0; status.textContent = 'Загружаем исходник…';
+    app?.enableClosingConfirmation();
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/upload/video'); xhr.timeout = 660000;
+    xhr.setRequestHeader('X-Telegram-Init-Data', initData);
+    xhr.setRequestHeader('X-Upload-ID', crypto.randomUUID());
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = event => { if (event.lengthComputable) { progress.value = event.loaded / event.total * 100; status.textContent = progress.value >= 100 ? 'Подтверждаем загрузку…' : `Загружено ${Math.round(progress.value)}%`; } };
+    function fail(text) { uploading = false; fileInput.disabled = false; status.textContent = text; app?.disableClosingConfirmation(); refreshButton(); }
+    xhr.onload = () => {
+      let data = {}; try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status === 202 && data.ok) {
+        progress.value = 100; status.textContent = 'Исходник принят. Пять вариантов придут в чат с ботом.';
+        app?.disableClosingConfirmation(); document.getElementById('close').hidden = false;
+      } else fail(data.error || 'Не удалось загрузить видео. Проверь /status в чате перед повторной отправкой.');
+    };
+    xhr.onerror = xhr.ontimeout = () => fail('Связь прервалась. Проверь /status в чате: если обработка началась, не отправляй файл повторно.');
+    xhr.send(file);
+  });
+  document.getElementById('close').addEventListener('click', () => app?.close());
+  prepare();
+</script>
+</body>
+</html>
