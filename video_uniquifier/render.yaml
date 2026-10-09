@@ -30,6 +30,8 @@ services:
         value: "false"
       - key: MAX_INPUT_MB
         value: "20"
+      - key: MAX_WEB_INPUT_MB
+        value: "200"
       - key: MAX_OUTPUT_MB
         value: "50"
       - key: MAX_DURATION_SECONDS
