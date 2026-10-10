@@ -8,6 +8,8 @@ import shutil
 import signal
 import tempfile
 import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,6 +87,7 @@ class VideoBot:
         self.slots = threading.BoundedSemaphore(settings.max_jobs)
         self.lock = threading.Lock()
         self.jobs: dict[tuple[int, int], threading.Event] = {}
+        self.progress: dict[tuple[int, int], dict] = {}
         self.modes: dict[int, str] = {}
         self.stop = threading.Event()
         self.upload_url: str | None = None
@@ -114,12 +117,36 @@ class VideoBot:
                 raise MediaError('Бот занят. Пришлите видео после завершения текущей обработки.')
             event = threading.Event()
             self.jobs[key] = event
+            self.progress[key] = {'job_id': uuid.uuid4().hex[:12], 'stage': 'accepted',
+                                  'version': 0, 'sent': 0, 'started': time.monotonic()}
             return key, event, self.modes.get(user, 'micro')
 
     def release_job(self, key):
         with self.lock:
             self.jobs.pop(key, None)
+            self.progress.pop(key, None)
         self.slots.release()
+
+    def job_stage(self, key, stage, version=0, sent=0):
+        with self.lock:
+            progress = self.progress[key]
+            progress.update(stage=stage, version=version, sent=sent)
+            snapshot = dict(progress)
+        self.log_job(snapshot)
+
+    @staticmethod
+    def log_job(progress):
+        # Only generated identifiers and counters; never file names, URLs, tokens or chat IDs.
+        LOG.info('job=%s stage=%s version=%d sent=%d/5 elapsed_seconds=%d',
+                 progress['job_id'], progress['stage'], progress['version'], progress['sent'],
+                 time.monotonic() - progress['started'])
+
+    def log_active_jobs(self):
+        with self.lock:
+            active = [dict(progress) for progress in self.progress.values()]
+        for progress in active:
+            self.log_job(progress)
+        return bool(active)
 
     def say(self, chat: int, text: str, cancel: threading.Event | None = None):
         return retry_rate_limit(lambda: self.api.call('sendMessage', {'chat_id': chat, 'text': text}),
@@ -159,8 +186,17 @@ class VideoBot:
             self.say(chat, 'Режим для следующих видео: ' + text[1:])
         elif text == '/status':
             with self.lock:
-                active = key in self.jobs
-            self.say(chat, 'Видео обрабатывается.' if active else 'Можно прислать видео.')
+                progress = dict(self.progress.get(key, {}))
+            if progress:
+                minutes = int((time.monotonic() - progress['started']) / 60)
+                stage = {'accepted': 'Принято', 'download': 'Получаю исходник',
+                         'render': f'Обрабатываю версию {progress["version"]}/5',
+                         'send': f'Отправляю версию {progress["version"]}/5',
+                         'delivered': f'Версия {progress["version"]}/5 отправлена',
+                         'report': 'Отправляю отчёт', 'completed': 'Готово'}.get(progress['stage'], 'Обрабатываю')
+                self.say(chat, f'{stage}. Отправлено {progress["sent"]}/5 видео. Прошло {minutes} мин.')
+            else:
+                self.say(chat, 'Можно прислать видео.')
         elif text == '/cancel':
             with self.lock:
                 event = self.jobs.get(key)
@@ -192,6 +228,7 @@ class VideoBot:
         chat, user = key
         sent = 0
         try:
+            self.job_stage(key, 'download')
             self.say(chat, f'Принято. Создаю 5 версий ({mode}).', cancel)
             with tempfile.TemporaryDirectory(prefix='job-', dir=self.cfg.work_dir) as temp:
                 folder = Path(temp)
@@ -208,6 +245,7 @@ class VideoBot:
                 source_hash = sha256(source)
                 results = []
                 for i in range(5):
+                    self.job_stage(key, 'render', i + 1, sent)
                     self.say(chat, f'Обрабатываю версию {i + 1}/5…', cancel)
                     path = folder / f'version_{i + 1}.mp4'
                     result = render(source, path, i, mode=mode, cancel=cancel, crf=self.cfg.crf,
@@ -219,24 +257,32 @@ class VideoBot:
                                          'качество автоматически не снижалось.')
                     caption = (f'Версия {i + 1}/5\n{result["description"]}\n'
                                f'SHA-256 до: {source_hash}\nSHA-256 после: {result["sha256"]}')
+                    self.job_stage(key, 'send', i + 1, sent)
                     retry_rate_limit(lambda: self.api.send_document(chat, path, caption,
                                                                     message['message_id'], cancel), cancel)
                     sent += 1
+                    self.job_stage(key, 'delivered', i + 1, sent)
                     results.append(result)
                     path.unlink()
                 report = folder / 'report.json'
                 report.write_text(json.dumps({'source_sha256': source_hash, 'variants': results},
                                              ensure_ascii=False, indent=2), encoding='utf-8')
+                self.job_stage(key, 'report', 5, sent)
                 retry_rate_limit(lambda: self.api.send_document(chat, report, 'Отчёт обработки пяти версий.',
                                                                 message['message_id'], cancel), cancel)
                 self.say(chat, 'Готово: отправлено 5 видео. Скачивайте файлы для публикации.', cancel)
+                self.job_stage(key, 'completed', 5, sent)
         except Cancelled:
+            LOG.warning('job=%s cancelled sent=%d/5', self.progress[key]['job_id'], sent)
             self.notify_failure(chat, f'Отменено. Отправлено {sent}/5 видео.')
         except (MediaError, ValueError) as error:
+            LOG.warning('job=%s failed kind=%s sent=%d/5', self.progress[key]['job_id'],
+                        type(error).__name__, sent)
             self.notify_failure(chat, f'{error}\nОтправлено {sent}/5 видео.')
         except Exception as error:
             # Exceptions may contain the bot token/URLs; log class only.
-            LOG.error('Job failed: %s', type(error).__name__)
+            LOG.error('job=%s failed kind=%s sent=%d/5', self.progress[key]['job_id'],
+                      type(error).__name__, sent)
             self.notify_failure(chat, f'Ошибка обработки или отправки. Отправлено {sent}/5 видео. '
                                 'Проверьте подключение и настройки сервера, затем пришлите файл снова.')
         finally:
