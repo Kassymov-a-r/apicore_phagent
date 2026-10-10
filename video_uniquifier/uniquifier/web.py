@@ -250,6 +250,9 @@ def main():
     try:
         while not bot.stop.is_set():
             try:
+                if settings.large_files:
+                    bot.api.prepare(bot.stop)
+                    LOG.info('Large file sender authorized; output limit_bytes=%d', settings.max_output)
                 register_webhook(bot.api, url, secret)
                 if not bot.stop.is_set():
                     inbox.ready.set()
