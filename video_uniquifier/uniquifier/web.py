@@ -10,9 +10,11 @@ import queue
 import shutil
 import signal
 import threading
+import time
 from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
+from urllib.request import urlopen
 
 from .bot import Settings, VideoBot, load_env
 from .uploads import UPLOAD_PAGE, Uploads
@@ -20,6 +22,31 @@ from .uploads import UPLOAD_PAGE, Uploads
 LOG = logging.getLogger('video_bot')
 WEBHOOK_PATH = '/telegram/webhook'
 MAX_BODY = 64 * 1024
+
+
+class ActiveJobWatch:
+    """Report progress and check the public service only while a job is running."""
+    def __init__(self, bot, health_url, interval=0):
+        if interval != 0 and not 60 <= interval <= 600:
+            raise ValueError('ACTIVE_JOB_HEARTBEAT_SECONDS должен быть 0 или от 60 до 600.')
+        self.bot = bot
+        self.health_url = health_url
+        self.interval = interval
+        self.last_check = None
+
+    def tick(self):
+        if self.bot.stop.is_set() or not self.bot.log_active_jobs() or not self.interval:
+            return
+        now = time.monotonic()
+        if self.last_check is not None and now - self.last_check < self.interval:
+            return
+        self.last_check = now
+        try:
+            with urlopen(self.health_url, timeout=10) as response:
+                if response.status != 200:
+                    LOG.warning('Active job health check failed: HTTP %d', response.status)
+        except Exception as error:
+            LOG.warning('Active job health check failed: %s', type(error).__name__)
 
 
 def webhook_config():
@@ -197,11 +224,13 @@ def main():
     try:
         url, secret, port = webhook_config()
         settings = Settings.from_env()
+        heartbeat_seconds = int(os.getenv('ACTIVE_JOB_HEARTBEAT_SECONDS', '0'))
         if settings.local_api:
             raise ValueError('Render webhook использует облачный Telegram Bot API.')
     except ValueError as error:
         raise SystemExit(str(error)) from None
     bot = VideoBot(settings)
+    watch = ActiveJobWatch(bot, url.removesuffix(WEBHOOK_PATH) + '/healthz', heartbeat_seconds)
     bot.upload_url = url.removesuffix(WEBHOOK_PATH) + '/upload'
     inbox = WebhookInbox(bot, secret)
     server = make_server(inbox, port=port)
@@ -229,7 +258,8 @@ def main():
             except Exception as error:
                 LOG.error('Webhook registration failed: %s', type(error).__name__)
                 bot.stop.wait(10)
-        bot.stop.wait()
+        while not bot.stop.wait(60):
+            watch.tick()
     finally:
         inbox.ready.clear()
         bot.stop.set()
