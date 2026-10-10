@@ -21,6 +21,10 @@ class Cancelled(MediaError):
     pass
 
 
+class ProcessingTimeout(MediaError):
+    pass
+
+
 @dataclass(frozen=True)
 class Variant:
     speed: float
@@ -63,7 +67,7 @@ def run(command: list[str], cancel: threading.Event, timeout: float) -> str:
                 if cancel.is_set():
                     raise Cancelled('Задача отменена.')
                 if time.monotonic() - started > timeout:
-                    raise MediaError('Превышено время обработки видео.')
+                    raise ProcessingTimeout('Превышено время обработки видео.')
         if proc.returncode:
             # Keep codec diagnostics local; never reflect arbitrary file data into chat.
             raise MediaError('FFmpeg не смог прочитать или обработать видео.')
