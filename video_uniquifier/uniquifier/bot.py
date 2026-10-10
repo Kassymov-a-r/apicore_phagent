@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .media import Cancelled, MediaError, render, sha256
@@ -39,6 +39,9 @@ class Settings:
     preset: str = 'slow'
     threads: int = 2
     timeout: int = 1800
+    large_files: bool = False
+    telegram_api_id: int = 0
+    telegram_api_hash: str = field(default='', repr=False)
 
     @classmethod
     def from_env(cls):
@@ -49,6 +52,11 @@ class Settings:
         if not allowed:
             raise ValueError('Укажите ALLOWED_USER_IDS. Узнать ID можно у @userinfobot.')
         local = os.getenv('BOT_API_LOCAL', 'false').lower() == 'true'
+        large = os.getenv('TELEGRAM_LARGE_FILES', 'false').lower() == 'true'
+        try:
+            api_id = int(os.getenv('TELEGRAM_API_ID', '0') or '0')
+        except ValueError:
+            raise ValueError('TELEGRAM_API_ID должен быть целым числом.') from None
         cfg = cls(token=token, allowed=allowed, local_api=local,
                   api_base=os.getenv('BOT_API_BASE_URL', 'https://api.telegram.org'),
                   local_root=Path(os.environ['BOT_API_FILE_ROOT']) if os.getenv('BOT_API_FILE_ROOT') else None,
@@ -60,7 +68,10 @@ class Settings:
                   max_pixels=int(os.getenv('MAX_PIXELS', str(3840 * 2160))),
                   max_jobs=int(os.getenv('MAX_JOBS', '1')), crf=int(os.getenv('VIDEO_CRF', '16')),
                   preset=os.getenv('VIDEO_PRESET', 'slow'), threads=int(os.getenv('FFMPEG_THREADS', '2')),
-                  timeout=int(os.getenv('PROCESS_TIMEOUT_SECONDS', '1800')))
+                  timeout=int(os.getenv('PROCESS_TIMEOUT_SECONDS', '1800')),
+                  large_files=large,
+                  telegram_api_id=api_id,
+                  telegram_api_hash=os.getenv('TELEGRAM_API_HASH', '').strip())
         if not (1 <= cfg.max_jobs <= 4 and 0 <= cfg.crf <= 23 and 1 <= cfg.threads <= 16):
             raise ValueError('Проверьте MAX_JOBS, VIDEO_CRF и FFMPEG_THREADS.')
         if cfg.preset not in ('ultrafast','superfast','veryfast','faster','fast','medium','slow','slower','veryslow'):
@@ -69,7 +80,9 @@ class Settings:
             raise ValueError('Лимиты должны быть положительными.')
         if not 1 <= cfg.max_web_input <= 500 * 1024**2:
             raise ValueError('MAX_WEB_INPUT_MB должен быть от 1 до 500.')
-        if not local and (cfg.max_input > 20 * 1024**2 or cfg.max_output > 50 * 1024**2):
+        if large and (cfg.telegram_api_id <= 0 or not re.fullmatch('[a-fA-F0-9]{32}', cfg.telegram_api_hash)):
+            raise ValueError('Для больших результатов задайте TELEGRAM_API_ID и TELEGRAM_API_HASH.')
+        if not local and (cfg.max_input > 20 * 1024**2 or (not large and cfg.max_output > 50 * 1024**2)):
             raise ValueError('Для больших файлов нужен BOT_API_LOCAL=true и локальный Bot API.')
         if local and ('api.telegram.org' in cfg.api_base or not cfg.local_root):
             raise ValueError('Для local API задайте BOT_API_BASE_URL и BOT_API_FILE_ROOT.')
@@ -82,6 +95,9 @@ class VideoBot:
     def __init__(self, settings: Settings, api=None):
         self.cfg = settings
         self.api = api or TelegramAPI(settings.token, settings.api_base, settings.local_root)
+        if api is None and settings.large_files:
+            from .large_files import LargeFileAPI
+            self.api = LargeFileAPI(self.api, settings)
         self.cfg.work_dir.mkdir(parents=True, exist_ok=True)
         self.pool = ThreadPoolExecutor(max_workers=settings.max_jobs)
         self.slots = threading.BoundedSemaphore(settings.max_jobs)
@@ -253,6 +269,8 @@ class VideoBot:
                                     timeout=self.cfg.timeout, max_duration=self.cfg.max_duration,
                                     max_pixels=self.cfg.max_pixels)
                     if path.stat().st_size > self.cfg.max_output:
+                        LOG.warning('job=%s output_too_large version=%d size_bytes=%d limit_bytes=%d',
+                                    self.progress[key]['job_id'], i + 1, path.stat().st_size, self.cfg.max_output)
                         raise MediaError('Результат превышает лимит отправки. Настройте локальный Bot API; '
                                          'качество автоматически не снижалось.')
                     caption = (f'Версия {i + 1}/5\n{result["description"]}\n'
