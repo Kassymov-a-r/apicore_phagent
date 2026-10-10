@@ -2,6 +2,7 @@ FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+RUN pip install --no-cache-dir Telethon==1.45.0 cryptg==0.5.2
 COPY uniquifier ./uniquifier
 # Render Free wakes this HTTP server when Telegram sends an update.
 CMD ["python", "-m", "uniquifier.web"]
