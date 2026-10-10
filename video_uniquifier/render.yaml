@@ -47,4 +47,6 @@ services:
       - key: FFMPEG_THREADS
         value: "1"
       - key: PROCESS_TIMEOUT_SECONDS
-        value: "600"
+        value: "3600"
+      - key: ACTIVE_JOB_HEARTBEAT_SECONDS
+        value: "240"
