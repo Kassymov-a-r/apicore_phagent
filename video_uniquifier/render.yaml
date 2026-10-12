@@ -33,9 +33,11 @@ services:
       - key: MAX_WEB_INPUT_MB
         value: "200"
       - key: MAX_OUTPUT_MB
-        value: "50"
+        value: "500"
+      - key: OUTPUT_DELIVERY
+        value: links
       - key: MAX_DURATION_SECONDS
-        value: "90"
+        value: "180"
       - key: MAX_PIXELS
         value: "2073600"
       - key: MAX_JOBS
