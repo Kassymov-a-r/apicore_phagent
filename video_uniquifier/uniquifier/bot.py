@@ -42,6 +42,7 @@ class Settings:
     large_files: bool = False
     telegram_api_id: int = 0
     telegram_api_hash: str = field(default='', repr=False)
+    output_delivery: str = 'files'
 
     @classmethod
     def from_env(cls):
@@ -71,7 +72,10 @@ class Settings:
                   timeout=int(os.getenv('PROCESS_TIMEOUT_SECONDS', '1800')),
                   large_files=large,
                   telegram_api_id=api_id,
-                  telegram_api_hash=os.getenv('TELEGRAM_API_HASH', '').strip())
+                  telegram_api_hash=os.getenv('TELEGRAM_API_HASH', '').strip(),
+                  output_delivery=os.getenv('OUTPUT_DELIVERY', 'files').strip())
+        if cfg.output_delivery not in ('files', 'links'):
+            raise ValueError('OUTPUT_DELIVERY должен быть files или links.')
         if not (1 <= cfg.max_jobs <= 4 and 0 <= cfg.crf <= 23 and 1 <= cfg.threads <= 16):
             raise ValueError('Проверьте MAX_JOBS, VIDEO_CRF и FFMPEG_THREADS.')
         if cfg.preset not in ('ultrafast','superfast','veryfast','faster','fast','medium','slow','slower','veryslow'):
@@ -82,7 +86,8 @@ class Settings:
             raise ValueError('MAX_WEB_INPUT_MB должен быть от 1 до 500.')
         if large and (cfg.telegram_api_id <= 0 or not re.fullmatch('[a-fA-F0-9]{32}', cfg.telegram_api_hash)):
             raise ValueError('Для больших результатов задайте TELEGRAM_API_ID и TELEGRAM_API_HASH.')
-        if not local and (cfg.max_input > 20 * 1024**2 or (not large and cfg.max_output > 50 * 1024**2)):
+        if not local and (cfg.max_input > 20 * 1024**2 or
+                          (not large and cfg.output_delivery != 'links' and cfg.max_output > 50 * 1024**2)):
             raise ValueError('Для больших файлов нужен BOT_API_LOCAL=true и локальный Bot API.')
         if local and ('api.telegram.org' in cfg.api_base or not cfg.local_root):
             raise ValueError('Для local API задайте BOT_API_BASE_URL и BOT_API_FILE_ROOT.')
@@ -107,6 +112,11 @@ class VideoBot:
         self.modes: dict[int, str] = {}
         self.stop = threading.Event()
         self.upload_url: str | None = None
+        self.download_base: str | None = None
+        self.results = None
+        if settings.output_delivery == 'links':
+            from .results import ResultDownloads
+            self.results = ResultDownloads(settings.work_dir / 'results')
 
     def offer_upload(self, message):
         chat = message['chat']['id']
@@ -116,6 +126,7 @@ class VideoBot:
         payload = {'chat_id': chat,
                    'text': f'Загрузите исходник до {self.cfg.max_web_input // 1024**2} MiB '
                            'без сжатия через кнопку ниже. Пять результатов придут в этот чат. '
+                           + ('В виде временных ссылок; скачивайте сразу. ' if self.results else '') +
                            f'До {self.cfg.max_duration} секунд; каждый результат — '
                            f'до {self.cfg.max_output // 1024**2} MiB.',
                    'reply_markup': {'inline_keyboard': [[{'text': 'Загрузить видео без сжатия',
@@ -124,6 +135,8 @@ class VideoBot:
 
     def reserve_job(self, chat, user):
         key = (chat, user)
+        if self.results and chat != user:
+            raise MediaError('Для получения ссылок используйте личный чат с ботом.')
         with self.lock:
             if self.stop.is_set():
                 raise MediaError('Сервис перезапускается. Попробуйте через минуту.')
@@ -165,7 +178,8 @@ class VideoBot:
         return bool(active)
 
     def say(self, chat: int, text: str, cancel: threading.Event | None = None):
-        return retry_rate_limit(lambda: self.api.call('sendMessage', {'chat_id': chat, 'text': text}),
+        return retry_rate_limit(lambda: self.api.call('sendMessage', {'chat_id': chat, 'text': text,
+                                'link_preview_options': {'is_disabled': True}}),
                                 cancel or self.stop)
 
     def handle(self, message: dict):
@@ -183,7 +197,9 @@ class VideoBot:
         key = (chat, user)
         if text in ('/start', '/help'):
             self.say(chat, 'Пришлите видео как ФАЙЛ, чтобы сохранить исходное качество. '
-                     'Я верну 5 версий файлами в этот чат.\n'
+                     + ('Я верну 5 временных ссылок в этот чат. Скачивайте сразу: '
+                        'при засыпании или перезапуске сервера файлы исчезают.\n' if self.results else
+                        'Я верну 5 версий файлами в этот чат.\n') +
                      '/micro — мягкие изменения, MP4 высокого качества (по умолчанию).\n'
                      '/lossless — MP4/MOV без перекодирования, кадры и звук сохранены.\n'
                      '/status — состояние; /cancel — отменить; /id — ваш ID.\n'
@@ -209,8 +225,10 @@ class VideoBot:
                          'render': f'Обрабатываю версию {progress["version"]}/5',
                          'send': f'Отправляю версию {progress["version"]}/5',
                          'delivered': f'Версия {progress["version"]}/5 отправлена',
+                         'link_sent': f'Ссылка {progress["version"]}/5 отправлена',
                          'report': 'Отправляю отчёт', 'completed': 'Готово'}.get(progress['stage'], 'Обрабатываю')
-                self.say(chat, f'{stage}. Отправлено {progress["sent"]}/5 видео. Прошло {minutes} мин.')
+                unit = 'ссылок' if self.results else 'видео'
+                self.say(chat, f'{stage}. Отправлено {progress["sent"]}/5 {unit}. Прошло {minutes} мин.')
             else:
                 self.say(chat, 'Можно прислать видео.')
         elif text == '/cancel':
@@ -271,37 +289,52 @@ class VideoBot:
                     if path.stat().st_size > self.cfg.max_output:
                         LOG.warning('job=%s output_too_large version=%d size_bytes=%d limit_bytes=%d',
                                     self.progress[key]['job_id'], i + 1, path.stat().st_size, self.cfg.max_output)
-                        raise MediaError('Результат превышает лимит отправки. Настройте локальный Bot API; '
+                        raise MediaError('Результат превышает настроенный лимит размера; '
                                          'качество автоматически не снижалось.')
                     caption = (f'Версия {i + 1}/5\n{result["description"]}\n'
                                f'SHA-256 до: {source_hash}\nSHA-256 после: {result["sha256"]}')
                     self.job_stage(key, 'send', i + 1, sent)
-                    retry_rate_limit(lambda: self.api.send_document(chat, path, caption,
-                                                                    message['message_id'], cancel), cancel)
+                    if self.results:
+                        if not self.download_base or chat != user or user not in self.cfg.allowed:
+                            raise MediaError('Ссылки доступны только в личном чате владельца на веб-сервисе.')
+                        token = self.results.publish(path, i + 1)
+                        try:
+                            self.say(chat, caption + '\n\nСкачать: ' + self.download_base + '/results/' + token +
+                                     '\nСкачайте сразу. Ссылка действует до часа, но файлы могут исчезнуть '
+                                     'раньше при засыпании или перезапуске сервера.', cancel)
+                        except BaseException:
+                            self.results.revoke(token)
+                            raise
+                    else:
+                        retry_rate_limit(lambda: self.api.send_document(chat, path, caption,
+                                                                        message['message_id'], cancel), cancel)
                     sent += 1
-                    self.job_stage(key, 'delivered', i + 1, sent)
+                    self.job_stage(key, 'link_sent' if self.results else 'delivered', i + 1, sent)
                     results.append(result)
-                    path.unlink()
+                    path.unlink(missing_ok=True)
                 report = folder / 'report.json'
                 report.write_text(json.dumps({'source_sha256': source_hash, 'variants': results},
                                              ensure_ascii=False, indent=2), encoding='utf-8')
                 self.job_stage(key, 'report', 5, sent)
                 retry_rate_limit(lambda: self.api.send_document(chat, report, 'Отчёт обработки пяти версий.',
                                                                 message['message_id'], cancel), cancel)
-                self.say(chat, 'Готово: отправлено 5 видео. Скачивайте файлы для публикации.', cancel)
+                self.say(chat, 'Готово: отправлено 5 ссылок. Скачайте все видео сейчас; '
+                         'ссылки временные.' if self.results else
+                         'Готово: отправлено 5 видео. Скачивайте файлы для публикации.', cancel)
                 self.job_stage(key, 'completed', 5, sent)
         except Cancelled:
             LOG.warning('job=%s cancelled sent=%d/5', self.progress[key]['job_id'], sent)
-            self.notify_failure(chat, f'Отменено. Отправлено {sent}/5 видео.')
+            self.notify_failure(chat, f'Отменено. Отправлено {sent}/5 ' + ('ссылок.' if self.results else 'видео.'))
         except (MediaError, ValueError) as error:
             LOG.warning('job=%s failed kind=%s sent=%d/5', self.progress[key]['job_id'],
                         type(error).__name__, sent)
-            self.notify_failure(chat, f'{error}\nОтправлено {sent}/5 видео.')
+            self.notify_failure(chat, f'{error}\nОтправлено {sent}/5 ' + ('ссылок.' if self.results else 'видео.'))
         except Exception as error:
             # Exceptions may contain the bot token/URLs; log class only.
             LOG.error('job=%s failed kind=%s sent=%d/5', self.progress[key]['job_id'],
                       type(error).__name__, sent)
-            self.notify_failure(chat, f'Ошибка обработки или отправки. Отправлено {sent}/5 видео. '
+            self.notify_failure(chat, f'Ошибка обработки или отправки. Отправлено {sent}/5 ' +
+                                ('ссылок. ' if self.results else 'видео. ') +
                                 'Проверьте подключение и настройки сервера, затем пришлите файл снова.')
         finally:
             if uploaded_source:
