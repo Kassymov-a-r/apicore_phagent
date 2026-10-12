@@ -166,6 +166,9 @@ def make_server(inbox, host='0.0.0.0', port=10000):
 
         def do_GET(self):
             path = urlsplit(self.path).path
+            if path.startswith('/results/') and isinstance(inbox.bot, VideoBot) and inbox.bot.results:
+                inbox.bot.results.serve(self, path.removeprefix('/results/'))
+                return
             if path == '/upload':
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -184,6 +187,13 @@ def make_server(inbox, host='0.0.0.0', port=10000):
                 return
             self.respond((200 if inbox.ready.is_set() and not inbox.bot.stop.is_set() else 503)
                          if self.path == '/healthz' else 404)
+
+        def do_HEAD(self):
+            path = urlsplit(self.path).path
+            if path.startswith('/results/') and isinstance(inbox.bot, VideoBot) and inbox.bot.results:
+                inbox.bot.results.serve(self, path.removeprefix('/results/'), head=True)
+            else:
+                self.respond(404)
 
         def do_POST(self):
             if self.path == '/upload/video':
@@ -232,6 +242,7 @@ def main():
     bot = VideoBot(settings)
     watch = ActiveJobWatch(bot, url.removesuffix(WEBHOOK_PATH) + '/healthz', heartbeat_seconds)
     bot.upload_url = url.removesuffix(WEBHOOK_PATH) + '/upload'
+    bot.download_base = url.removesuffix(WEBHOOK_PATH)
     inbox = WebhookInbox(bot, secret)
     server = make_server(inbox, port=port)
     http_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -257,12 +268,16 @@ def main():
                 if not bot.stop.is_set():
                     inbox.ready.set()
                 LOG.info('Webhook ready; waiting for video uploads')
+                LOG.info('Video limits: max_duration_seconds=%d max_web_input_bytes=%d max_output_bytes=%d output_delivery=%s',
+                         settings.max_duration, settings.max_web_input, settings.max_output, settings.output_delivery)
                 break
             except Exception as error:
                 LOG.error('Webhook registration failed: %s', type(error).__name__)
                 bot.stop.wait(10)
         while not bot.stop.wait(60):
             watch.tick()
+            if bot.results:
+                bot.results.cleanup()
     finally:
         inbox.ready.clear()
         bot.stop.set()
